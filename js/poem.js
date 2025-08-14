@@ -17,7 +17,7 @@ const FLOAT_GAIN    = 10;   // px per unit height (vertical bob)
 const ROT_GAIN      = 5;    // deg per slope unit (rocking)
 const SWAY_PX       = 2;     // small horizontal drift
 const CONTRAST_GAIN = 3200;  // slope -> opacity gain
-const OPACITY_MIN   = 0.30;  // baseline opacity
+const OPACITY_MIN   = 0.35;  // baseline opacity
 const E             = 2;     // px offset for slope sampling
 
 // Poem layout
