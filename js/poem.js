@@ -5,7 +5,7 @@
 // - Letters float/rock like leaves, opacity couples to local wave contrast.
 // - Motion clamped to ≤ fontSize * 1.5
 // - Poem auto-fits the current page (shrinks title/body/gap if needed)
-// - Re-fits on window resize
+// - Re-fits on window resize / iOS visual viewport changes
 //
 // Requires: window.WATER with sampleHeightCSS(x, y).
 
@@ -27,6 +27,10 @@ const E             = 2;    // px offset for slope sampling
 const LINE_GAP      = 34;
 const TITLE_SIZE    = 22;
 const BODY_SIZE     = 18;
+
+// Respect reduced-motion user preference
+const REDUCED_MOTION = typeof window.matchMedia === 'function'
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // === clamp helpers: keep motion ≤ fontSize * 1.5 ===
 function fontPx(el){
@@ -61,22 +65,30 @@ function maxLineWidth(linesEl) {
 function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   if (!linesEl) return;
 
+  // Container (.poem-center) defines the max area
   const container = linesEl.parentElement || linesEl;
   const cw = container.clientWidth  || window.innerWidth;
   const ch = container.clientHeight || window.innerHeight;
 
+  // Read actual inner padding of .poem-lines so width calc matches reality
+  const cs = getComputedStyle(linesEl);
+  const padL = parseFloat(cs.paddingLeft)  || 0;
+  const padR = parseFloat(cs.paddingRight) || 0;
+  const innerPadX = padL + padR;
+
   // Safety margins to avoid visual clipping from glyph bob/rotation
-  const SAFE_HPAD = 16;   // match CSS padding: 0 16px
+  const SAFE_HPAD = 16;   // cushion beyond .poem-lines padding
   const SAFE_VPAD = 24;   // small vertical cushion (px)
   const EXTRA_X   = 8;    // allow a bit of horizontal overhang in width calc
   const EXTRA_Y   = 24;   // allow vertical bob in height calc
 
-  const availW = Math.max(1, cw - SAFE_HPAD * 2);
+  const availW = Math.max(1, cw - innerPadX - SAFE_HPAD * 2);
   const availH = Math.max(1, ch - SAFE_VPAD);
 
   const titleEl = linesEl.querySelector('.poem-line.title');
   const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
 
+  // Cache originals once
   if (!linesEl.dataset.origTitlePx) {
     linesEl.dataset.origTitlePx = String(px(titleEl, 'fontSize') || 22);
     linesEl.dataset.origBodyPx  = String(px(bodyEl,  'fontSize') || 18);
@@ -86,6 +98,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   const origBodyPx  = parseFloat(linesEl.dataset.origBodyPx);
   const origGapPx   = parseFloat(linesEl.dataset.origGapPx);
 
+  // Start from originals every time we fit
   let scale  = 1.0;
   let titlePx = origTitlePx;
   let bodyPx  = origBodyPx;
@@ -100,6 +113,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   apply();
 
   const fits = () => {
+    // Measure width by checking widest line
     let maxW = 0;
     linesEl.querySelectorAll('.poem-line').forEach(line => {
       const w = line.getBoundingClientRect().width;
@@ -118,25 +132,29 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   while (guard++ < 16) {
     const { tooWide, tooTall } = fits();
     if (!tooWide && !tooTall) {
-      container.classList.remove('poem-scroll');
+      container.classList.remove('poem-scroll'); // perfect fit: no scroll
       return;
     }
 
+    // Compute conservative shrink this round
     const needW = availW / Math.max(1, linesEl.getBoundingClientRect().width + EXTRA_X);
     const needH = availH / Math.max(1, linesEl.scrollHeight + EXTRA_Y);
-    let step = Math.min(needW, needH, 0.96);
+    let step = Math.min(needW, needH, 0.96);  // never grow
 
     const nextScale = Math.max(hardFloor, scale * step);
+
+    // Update sizes
     titlePx = origTitlePx * nextScale;
     bodyPx  = origBodyPx  * nextScale;
     gapPx   = Math.max(4, origGapPx * (0.8 + 0.2 * nextScale));
     apply();
     scale = nextScale;
 
+    // If we’re at the floor and still overflow, bail to scroll fallback
     if (scale === hardFloor) {
       const { tooWide: w2, tooTall: h2 } = fits();
       if (w2 || h2) {
-        container.classList.add('poem-scroll');   // vertical scroll fallback
+        container.classList.add('poem-scroll');   // enable vertical scroll
         container.scrollTop = 0;
       } else {
         container.classList.remove('poem-scroll');
@@ -145,6 +163,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
     }
   }
 
+  // Safety fallback (loop guard exhausted)
   container.classList.add('poem-scroll');
   container.scrollTop = 0;
 }
@@ -274,7 +293,7 @@ class PoemUI {
     poemLayer.querySelector('.poem-center')
              .addEventListener('touchstart', forwardToCanvas, { capture: true, passive: false });
 
-    // Double-tap anywhere to close poem
+    // Double-tap anywhere to close poem (iOS-friendly Escape)
     let lastTapTime = 0;
     poemLayer.addEventListener('touchend', (e) => {
       const now = Date.now();
@@ -303,7 +322,7 @@ class PoemUI {
   injectStyles() {
     const s = document.createElement('style');
     s.textContent = `
-      /* NEW: prevent any horizontal scrollbar */
+      /* prevent any horizontal scrollbar */
       html, body { overflow-x: hidden; }
 
       /* Transparent title chips: just text (no background/border) */
@@ -333,7 +352,8 @@ class PoemUI {
 
         /* Safe-area padding to avoid visual crop at edges */
         padding-top: env(safe-area-inset-top, 0);
-        padding-bottom: env(safe-area-inset-bottom, 0);
+        /* tiny extra bottom breathing room to protect last line while bobbing */
+        padding-bottom: calc(env(safe-area-inset-bottom, 0) + 6px);
 
         /* Let characters overhang a few px horizontally; keep Y controlled */
         overflow-y: hidden;
@@ -459,10 +479,25 @@ class PoemUI {
 
       // iOS: set explicit visual height, then fit
       this.updatePoemCenterHeight();
+
+      // initial fit on next frame
       requestAnimationFrame(() => {
         const box = this.layers.poemLayer.querySelector('.poem-lines');
         fitPoemBlock(box);
       });
+
+      // re-fit after fonts are fully ready (KR fonts etc.)
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(() => {
+          const box = this.layers.poemLayer.querySelector('.poem-lines');
+          fitPoemBlock(box);
+        });
+      } else {
+        setTimeout(() => {
+          const box = this.layers.poemLayer.querySelector('.poem-lines');
+          fitPoemBlock(box);
+        }, 50);
+      }
     }catch(e){ console.error('[poem] open error:', e); }
   }
 
@@ -520,8 +555,11 @@ class PoemUI {
   // --------- Unified RAF: float title chips + poem glyphs ----------
   startRAF(){
     if (this.raf) cancelAnimationFrame(this.raf);
+    if (REDUCED_MOTION) return; // politely disable per-frame float
 
+    let frame = 0; // micro-throttle for very long poems
     const step = ()=>{
+      frame++;
       const t = performance.now()/1000;
 
       // Float title chips
@@ -540,16 +578,13 @@ class PoemUI {
         if (alpha > 1) alpha = 1;
 
         el.style.opacity = alpha.toFixed(3);
-        // Titles are absolutely positioned via left/top; add transform-only motion
-        {
-          const { dx, dy } = clampDisp(el, sway, vy); // X, Y
-          el.style.transform =
-            `translate(-50%, -50%) translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
-        }
+        const { dx, dy } = clampDisp(el, sway, vy); // X, Y
+        el.style.transform =
+          `translate(-50%, -50%) translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
       }
 
-      // Float poem glyphs if poem is open
-      if (this.poemOpen) {
+      // Float poem glyphs if poem is open (update ~30fps to save work)
+      if (this.poemOpen && (frame & 1) === 0) {
         const box = this.layers.poemLayer.querySelector('.poem-lines');
         const chars = box ? box.querySelectorAll('.poem-char') : [];
         let idx = 0;
@@ -568,11 +603,9 @@ class PoemUI {
           if (alpha > 1) alpha = 1;
 
           el.style.opacity = alpha.toFixed(3);
-          {
-            const { dx, dy } = clampDisp(el, sway, vy);
-            el.style.transform =
-              `translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
-          }
+          const { dx, dy } = clampDisp(el, sway, vy);
+          el.style.transform =
+            `translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
           idx++;
         });
       }
