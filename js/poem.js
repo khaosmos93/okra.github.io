@@ -3,6 +3,9 @@
 // - Clicking a title opens the poem with ONLY text visible (no panel/backdrop).
 // - When a poem is shown, all title chips are removed.
 // - Letters float/rock like leaves, opacity couples to local wave contrast.
+// - Motion clamped to ≤ fontSize * 1.5
+// - Poem auto-fits the current page (shrinks title/body/gap if needed)
+// - Re-fits on window resize
 //
 // Requires: window.WATER with sampleHeightCSS(x, y).
 
@@ -15,10 +18,10 @@ const MAX_TITLES    = 18;
 // Leaf-like motion (shared by titles & poem glyphs)
 const FLOAT_GAIN    = 10;   // px per unit height (vertical bob)
 const ROT_GAIN      = 5;    // deg per slope unit (rocking)
-const SWAY_PX       = 2;     // small horizontal drift
-const CONTRAST_GAIN = 3200;  // slope -> opacity gain
-const OPACITY_MIN   = 0.35;  // baseline opacity
-const E             = 2;     // px offset for slope sampling
+const SWAY_PX       = 2;    // small horizontal drift
+const CONTRAST_GAIN = 3200; // slope -> opacity gain
+const OPACITY_MIN   = 0.35; // baseline opacity
+const E             = 2;    // px offset for slope sampling
 
 // Poem layout
 const LINE_GAP      = 34;
@@ -58,9 +61,10 @@ function maxLineWidth(linesEl) {
 function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   if (!linesEl) return;
 
-  // container size (centered poem area)
-  const cw = linesEl.clientWidth;
-  const ch = linesEl.clientHeight;
+  // container size (centered poem area = parent of .poem-lines)
+  const container = linesEl.parentElement || linesEl;
+  const cw = container.clientWidth;
+  const ch = container.clientHeight;
 
   const titleEl = linesEl.querySelector('.poem-line.title');
   const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
@@ -116,8 +120,6 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
     apply();
   }
 }
-
-
 
 class PoemUI {
   constructor() {
@@ -213,7 +215,7 @@ class PoemUI {
       .poem-center {
         position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
         width:min(92vw,900px); max-height:80vh; overflow:auto; /* transparent scroll if needed */
-        pointer-events:none; /* keep whole layer click-through */
+        pointer-events:auto; /* <-- allow clicks on poem text without closing */
       }
       .poem-lines {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -288,7 +290,7 @@ class PoemUI {
       if (!res.ok) throw new Error(`Failed to load poem/${file}`);
       const txt = await res.text();
 
-      // Remove all other titles when opening a poem (req #2)
+      // Remove all other titles when opening a poem
       this.clearTitles();
 
       const lines = txt.split(/\r?\n/);
@@ -299,6 +301,12 @@ class PoemUI {
       this.renderPoem(title, body);
       this.layers.poemLayer.style.display = 'block';
       this.poemOpen = true;
+
+      // ensure the whole poem fits the current page size
+      requestAnimationFrame(() => {
+        const box = this.layers.poemLayer.querySelector('.poem-lines');
+        fitPoemBlock(box);
+      });
     }catch(e){ console.error('[poem] open error:', e); }
   }
 
@@ -360,7 +368,7 @@ class PoemUI {
     const step = ()=>{
       const t = performance.now()/1000;
 
-      // Float title chips (req #3)
+      // Float title chips
       for (const el of this.titleEls) {
         const r = el.getBoundingClientRect();
         const cx = r.left + r.width/2, cy = r.top + r.height/2;
@@ -376,7 +384,7 @@ class PoemUI {
         if (alpha > 1) alpha = 1;
 
         el.style.opacity = alpha.toFixed(3);
-        // Titles are absolutely positioned via left/top; we add transform-only motion
+        // Titles are absolutely positioned via left/top; add transform-only motion
         {
           const { dx, dy } = clampDisp(el, sway, vy); // X, Y
           el.style.transform =
@@ -384,7 +392,7 @@ class PoemUI {
         }
       }
 
-      // Float poem glyphs if poem is open (req #1 & #2 already handled)
+      // Float poem glyphs if poem is open
       if (this.poemOpen) {
         const box = this.layers.poemLayer.querySelector('.poem-lines');
         const chars = box ? box.querySelectorAll('.poem-char') : [];
