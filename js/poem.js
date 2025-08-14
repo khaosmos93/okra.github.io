@@ -13,8 +13,8 @@ const TITLE_LINGER  = 8000;  // 0 => never auto-remove
 const MAX_TITLES    = 18;
 
 // Leaf-like motion (shared by titles & poem glyphs)
-const FLOAT_GAIN    = 520;   // px per unit height (vertical bob)
-const ROT_GAIN      = 22;    // deg per slope unit (rocking)
+const FLOAT_GAIN    = 100;   // px per unit height (vertical bob)
+const ROT_GAIN      = 50;    // deg per slope unit (rocking)
 const SWAY_PX       = 4;     // small horizontal drift
 const CONTRAST_GAIN = 3200;  // slope -> opacity gain
 const OPACITY_MIN   = 0.35;  // baseline opacity
