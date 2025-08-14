@@ -2,7 +2,6 @@ import { WaterSim } from './water.js';
 
 const sim = new WaterSim(document.getElementById('water'));
 
-// input: click/drag to add impulses
 function toGrid(e) {
   const rect = sim.cvs.getBoundingClientRect();
   const cssX = e.clientX - rect.left;
@@ -16,19 +15,18 @@ let dragging = false;
 sim.cvs.addEventListener('pointerdown', e => {
   dragging = true;
   const { gx, gy } = toGrid(e);
-  sim.clickQueue.push({ x: gx, y: gy, amp: 2.0, radius: 6 });
+  sim.clickQueue.push({ x: gx, y: gy, amp: sim.IMPULSE_AMP, radius: sim.IMPULSE_RADIUS });
 });
 sim.cvs.addEventListener('pointermove', e => {
   if (!dragging) return;
   const { gx, gy } = toGrid(e);
-  sim.clickQueue.push({ x: gx, y: gy, amp: 1.0, radius: 5 });
+  sim.clickQueue.push({ x: gx, y: gy, amp: sim.IMPULSE_AMP * 0.7, radius: sim.IMPULSE_RADIUS - 2 });
 });
 ['pointerup','pointercancel','pointerleave'].forEach(ev => {
   sim.cvs.addEventListener(ev, () => dragging = false);
 });
 
-// main loop
-function loop() {
+function loop(){
   sim.step();
   sim.render();
   requestAnimationFrame(loop);

@@ -1,13 +1,14 @@
 html, body {
   height: 100%;
   margin: 0;
-  background: #000; /* pure black */
+  background: #000; /* pure black background */
 }
 
 canvas#water {
   position: fixed;
   inset: 0;
   display: block;
+  background: #000; /* in case canvas clears, still black */
 }
 
 .hint {
