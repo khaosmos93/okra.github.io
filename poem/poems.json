@@ -22,5 +22,9 @@
   {
     "title": "오늘 만들기",
     "file": "make_today.txt"
+  },
+  {
+    "title": "출품일",
+    "file": "submit_day.txt"
   }
 ]
