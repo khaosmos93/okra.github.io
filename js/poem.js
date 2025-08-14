@@ -178,6 +178,13 @@ class PoemUI {
       </div>`;
     document.body.appendChild(poemLayer);
 
+    // re-fit on resize when poem is open
+    addEventListener('resize', () => {
+      if (!this.poemOpen) return;
+      const box = this.layers?.poemLayer?.querySelector('.poem-lines');
+      if (box) fitPoemBlock(box);
+    });
+
     // Close poem with ESC or click on canvas
     addEventListener('keydown', (e)=>{ if (e.key === 'Escape') this.closePoem(); });
     this.canvas.addEventListener('pointerdown', ()=>{ if (this.poemOpen) this.closePoem(); }, true);
@@ -292,11 +299,6 @@ class PoemUI {
       this.renderPoem(title, body);
       this.layers.poemLayer.style.display = 'block';
       this.poemOpen = true;
-      addEventListener('resize', () => {
-        if (!this.poemOpen) return;
-        const box = this.layers?.poemLayer?.querySelector('.poem-lines');
-        if (box) fitPoemBlock(box);
-      });
     }catch(e){ console.error('[poem] open error:', e); }
   }
 
