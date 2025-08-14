@@ -61,25 +61,26 @@ function maxLineWidth(linesEl) {
 function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   if (!linesEl) return;
 
-  // container size (centered poem area = parent of .poem-lines)
+  // Container is the parent (.poem-center) that defines our MAX WxH
   const container = linesEl.parentElement || linesEl;
-  const cw = container.clientWidth;
-  const ch = container.clientHeight;
+  const cw = container.clientWidth  || window.innerWidth;
+  const ch = container.clientHeight || window.innerHeight;
 
   const titleEl = linesEl.querySelector('.poem-line.title');
   const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
 
-  // cache originals once
+  // Cache original sizes once
   if (!linesEl.dataset.origTitlePx) {
     linesEl.dataset.origTitlePx = String(px(titleEl, 'fontSize') || 22);
     linesEl.dataset.origBodyPx  = String(px(bodyEl,  'fontSize') || 18);
     linesEl.dataset.origGapPx   = String(px(linesEl, 'rowGap') || px(linesEl, 'gap') || 20);
   }
-
   const origTitlePx = parseFloat(linesEl.dataset.origTitlePx);
   const origBodyPx  = parseFloat(linesEl.dataset.origBodyPx);
   const origGapPx   = parseFloat(linesEl.dataset.origGapPx);
 
+  // Start from originals every time we fit
+  let scale = 1.0;
   let titlePx = origTitlePx;
   let bodyPx  = origBodyPx;
   let gapPx   = origGapPx;
@@ -90,34 +91,64 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
       .forEach(el => el.style.fontSize = `${bodyPx}px`);
     linesEl.style.gap = `${gapPx}px`;
   };
+
   apply();
 
-  const tooTall = linesEl.scrollHeight > ch;
-  const widest  = maxLineWidth(linesEl);
-  const tooWide = widest > cw;
+  // Helper to measure current overflow
+  const fits = () => {
+    const widest = (() => {
+      let maxW = 0;
+      linesEl.querySelectorAll('.poem-line').forEach(line => {
+        const w = line.getBoundingClientRect().width;
+        if (w > maxW) maxW = w;
+      });
+      return maxW;
+    })();
+    const tooWide = widest > cw;
+    const tooTall = linesEl.scrollHeight > ch;
+    return { tooWide, tooTall };
+  };
 
-  if (!tooTall && !tooWide) return;
-
-  const scaleH = ch / Math.max(1, linesEl.scrollHeight);
-  const scaleW = cw / Math.max(1, widest);
-  let scale = Math.min(scaleH, scaleW, 1); // only shrink
-
+  // Iteratively shrink until it fits or we hit floors
   const minScaleTitle = minTitle / origTitlePx;
   const minScaleBody  = minBody  / origBodyPx;
-  const minScale = Math.min(minScaleTitle, minScaleBody);
-  if (scale < minScale) scale = minScale;
+  const hardFloor     = Math.min(minScaleTitle, minScaleBody);
 
-  titlePx = origTitlePx * scale;
-  bodyPx  = origBodyPx  * scale;
-  gapPx   = Math.max(6, origGapPx * (0.85 + 0.15 * scale)); // gentle gap shrink
+  let guard = 0;
+  while (guard++ < 16) {
+    const { tooWide, tooTall } = fits();
+    if (!tooWide && !tooTall) break;
 
-  apply();
+    // Compute “how much” we need to shrink this round
+    const needW = cw / Math.max(1, linesEl.getBoundingClientRect().width);
+    const needH = ch / Math.max(1, linesEl.scrollHeight);
+    // Use a conservative factor to avoid oscillation
+    let step = Math.min(needW, needH, 0.96);
 
-  // tiny safety nudge
-  if (linesEl.scrollHeight > ch || maxLineWidth(linesEl) > cw) {
-    const eps = 0.98;
-    titlePx *= eps; bodyPx *= eps; gapPx *= eps;
+    // Never grow
+    step = Math.min(step, 0.96);
+
+    // Apply new scale, but don’t go below floors
+    const nextScale = Math.max(hardFloor, scale * step);
+
+    // Update sizes from scale
+    titlePx = origTitlePx * nextScale;
+    bodyPx  = origBodyPx  * nextScale;
+    // Gap reduces gently with scale, but keep a floor
+    gapPx   = Math.max(4, origGapPx * (0.8 + 0.2 * nextScale));
+
     apply();
+    scale = nextScale;
+
+    // If we hit the floor but still overflow a hair, do a tiny nudge
+    if (scale === hardFloor) {
+      const { tooWide: w2, tooTall: h2 } = fits();
+      if (w2 || h2) {
+        titlePx *= 0.98; bodyPx *= 0.98; gapPx = Math.max(3, gapPx * 0.98);
+        apply();
+        break;
+      }
+    }
   }
 }
 
@@ -214,15 +245,23 @@ class PoemUI {
       #poem-layer { background: transparent; }
       .poem-center {
         position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-        width:min(92vw,900px); max-height:80vh; overflow:auto; /* transparent scroll if needed */
-        pointer-events:auto; /* <-- allow clicks on poem text without closing */
+        width:min(92vw,900px);
+        max-height:100vh;          /* use full viewport height */
+        overflow:hidden;           /* no scrollbars; we’ll fit instead */
+        pointer-events:auto;       /* allow clicks on poem text without closing */
       }
       .poem-lines {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
         gap:${Math.max(10, LINE_GAP - 12)}px;
         padding:0 12px;
+        width:100%;
+        height:100%;               /* so our fitter compares to full container */
       }
-      .poem-line { text-align:center; color:#e9eef4; text-shadow:0 1px 0 rgba(0,0,0,.5); }
+      .poem-line {
+        text-align:center; color:#e9eef4; text-shadow:0 1px 0 rgba(0,0,0,.5);
+        word-break: break-word;    /* prevent long words forcing width overflow */
+        overflow-wrap: anywhere;   /* extra safety for CJK/long tokens */
+      }
       .poem-line.title{
         font-weight:800; font-size:${TITLE_SIZE}px; letter-spacing:.2px; color:#f2f7ff;
       }
