@@ -208,6 +208,36 @@ class PoemUI {
       </div>`;
     document.body.appendChild(poemLayer);
 
+    // Forward clicks on the poem overlay to the canvas so waves still spawn when a poem is open
+    const forwardToCanvas = (e) => {
+      if (!this.poemOpen) return; // only forward while a poem is visible
+      const ev = new PointerEvent('pointerdown', {
+        clientX: e.clientX,
+        clientY: e.clientY,
+        buttons: e.buttons,
+        pointerId: e.pointerId || 1,
+        pointerType: e.pointerType || 'mouse',
+        bubbles: true,
+        cancelable: true
+      });
+      this.canvas.dispatchEvent(ev);
+    };
+
+    // The overlay root and its centered content both catch clicks
+    poemLayer.addEventListener('pointerdown', forwardToCanvas, true);
+    // Double-tap anywhere on the overlay to close the poem (iOS-friendly Escape)
+    let lastTapTime = 0;
+    poemLayer.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTapTime < 300) { // double tap detected (300ms threshold)
+        e.preventDefault();
+        this.closePoem();
+      }
+      lastTapTime = now;
+    }, { passive: false });
+    poemLayer.querySelector('.poem-center')
+             .addEventListener('pointerdown', forwardToCanvas, true);
+
     // re-fit on resize when poem is open
     addEventListener('resize', () => {
       if (!this.poemOpen) return;
@@ -217,7 +247,7 @@ class PoemUI {
 
     // Close poem with ESC or click on canvas
     addEventListener('keydown', (e)=>{ if (e.key === 'Escape') this.closePoem(); });
-    this.canvas.addEventListener('pointerdown', ()=>{ if (this.poemOpen) this.closePoem(); }, true);
+    // this.canvas.addEventListener('pointerdown', ()=>{ if (this.poemOpen) this.closePoem(); }, true);
 
     return { titleLayer, poemLayer };
   }
