@@ -183,6 +183,23 @@ class PoemUI {
     }
   }
 
+  updatePoemCenterHeight() {
+    const center = this.layers?.poemLayer?.querySelector('.poem-center');
+    if (!center) return;
+    const h = (window.visualViewport && window.visualViewport.height)
+      ? window.visualViewport.height
+      : window.innerHeight;
+    center.style.height = h + 'px';
+  }
+
+  // Reflow helper for iOS: update height, then refit if open
+  reflowPoemIfOpen = () => {
+    if (!this.poemOpen) return;
+    this.updatePoemCenterHeight();
+    const box = this.layers?.poemLayer?.querySelector('.poem-lines');
+    if (box) fitPoemBlock(box);
+  };
+
   createLayers() {
     // Transparent layer for clickable, floating titles
     const titleLayer = document.createElement('div');
@@ -207,6 +224,12 @@ class PoemUI {
         <div class="poem-lines"></div>
       </div>`;
     document.body.appendChild(poemLayer);
+
+    // iOS visual viewport changes (URL bar show/hide, rotation) — keep poem sized correctly
+    addEventListener('orientationchange', this.reflowPoemIfOpen);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', this.reflowPoemIfOpen);
+    }
 
     // Forward clicks on the poem overlay to the canvas so waves still spawn when a poem is open
     const forwardToCanvas = (e) => {
@@ -273,7 +296,13 @@ class PoemUI {
       .poem-center {
         position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
         width:min(92vw,900px);
-        max-height:100vh;
+
+        /* Explicit dynamic height for iOS; fallbacks included */
+        height: 100vh;        /* fallback */
+        height: 100dvh;       /* modern dynamic viewport */
+        max-height: 100vh;    /* fallback */
+        max-height: 100dvh;
+
         overflow:hidden;                 /* default: no scroll when we can fit */
         pointer-events:auto;             /* allow clicks on poem text */
       }
@@ -375,7 +404,8 @@ class PoemUI {
       this.layers.poemLayer.style.display = 'block';
       this.poemOpen = true;
 
-      // ensure the whole poem fits the current page size
+      // iOS: set explicit visual height, then fit
+      this.updatePoemCenterHeight();
       requestAnimationFrame(() => {
         const box = this.layers.poemLayer.querySelector('.poem-lines');
         fitPoemBlock(box);
