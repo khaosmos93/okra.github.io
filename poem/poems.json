@@ -2,5 +2,9 @@
   {
     "title": "기상",
     "file": "wake_up.txt"
+  },
+  {
+    "title": "엽서",
+    "file": "postcard.txt"
   }
 ]

@@ -186,10 +186,8 @@ export class WaterSim {
     this.ctx.drawImage(this.osc, 0, 0, W, H);
   }
 
-  // Return the current height value at a CSS-pixel position (x,y).
-  // Useful for UI elements that "float" on the water.
+  // Return the current height at a CSS-pixel position (x, y).
   sampleHeightCSS(cssX, cssY) {
-    // Guard
     if (!this.h || !this.gw || !this.gh) return 0;
     const gx = Math.max(1, Math.min(this.gw-2,
               Math.floor(cssX / (this.cvs.width  / this.DPR) * this.gw)));
