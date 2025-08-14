@@ -13,11 +13,11 @@ const TITLE_LINGER  = 8000;  // 0 => never auto-remove
 const MAX_TITLES    = 18;
 
 // Leaf-like motion (shared by titles & poem glyphs)
-const FLOAT_GAIN    = 100;   // px per unit height (vertical bob)
-const ROT_GAIN      = 50;    // deg per slope unit (rocking)
-const SWAY_PX       = 4;     // small horizontal drift
+const FLOAT_GAIN    = 10;   // px per unit height (vertical bob)
+const ROT_GAIN      = 5;    // deg per slope unit (rocking)
+const SWAY_PX       = 2;     // small horizontal drift
 const CONTRAST_GAIN = 3200;  // slope -> opacity gain
-const OPACITY_MIN   = 0.35;  // baseline opacity
+const OPACITY_MIN   = 0.30;  // baseline opacity
 const E             = 2;     // px offset for slope sampling
 
 // Poem layout
@@ -25,7 +25,7 @@ const LINE_GAP      = 34;
 const TITLE_SIZE    = 22;
 const BODY_SIZE     = 18;
 
-// --- clamp helpers (movement ≤ fontSize * 1.5) ---
+// === clamp helpers: keep motion ≤ fontSize * 1.5 ===
 function fontPx(el){
   return parseFloat(getComputedStyle(el).fontSize) || 16;
 }
@@ -34,7 +34,7 @@ function clampDisp(el, dx, dy, factor = 1.5){
   // per‑axis clamp
   let cx = Math.max(-max, Math.min(max, dx));
   let cy = Math.max(-max, Math.min(max, dy));
-  // radial clamp (just in case combined > max)
+  // radial clamp (if combined motion still exceeds)
   const mag = Math.hypot(cx, cy);
   if (mag > max){
     const s = max / mag;
@@ -42,6 +42,82 @@ function clampDisp(el, dx, dy, factor = 1.5){
   }
   return { dx: cx, dy: cy };
 }
+
+// ---- Auto-fit helpers (shrink title/body/gap if poem overflows) ----
+function px(el, prop) { return parseFloat(getComputedStyle(el)[prop]) || 0; }
+
+function maxLineWidth(linesEl) {
+  let maxW = 0;
+  linesEl.querySelectorAll('.poem-line').forEach(line => {
+    const w = line.getBoundingClientRect().width;
+    if (w > maxW) maxW = w;
+  });
+  return maxW;
+}
+
+function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
+  if (!linesEl) return;
+
+  // container size (centered poem area)
+  const cw = linesEl.clientWidth;
+  const ch = linesEl.clientHeight;
+
+  const titleEl = linesEl.querySelector('.poem-line.title');
+  const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
+
+  // cache originals once
+  if (!linesEl.dataset.origTitlePx) {
+    linesEl.dataset.origTitlePx = String(px(titleEl, 'fontSize') || 22);
+    linesEl.dataset.origBodyPx  = String(px(bodyEl,  'fontSize') || 18);
+    linesEl.dataset.origGapPx   = String(px(linesEl, 'rowGap') || px(linesEl, 'gap') || 20);
+  }
+
+  const origTitlePx = parseFloat(linesEl.dataset.origTitlePx);
+  const origBodyPx  = parseFloat(linesEl.dataset.origBodyPx);
+  const origGapPx   = parseFloat(linesEl.dataset.origGapPx);
+
+  let titlePx = origTitlePx;
+  let bodyPx  = origBodyPx;
+  let gapPx   = origGapPx;
+
+  const apply = () => {
+    titleEl.style.fontSize = `${titlePx}px`;
+    linesEl.querySelectorAll('.poem-line.body')
+      .forEach(el => el.style.fontSize = `${bodyPx}px`);
+    linesEl.style.gap = `${gapPx}px`;
+  };
+  apply();
+
+  const tooTall = linesEl.scrollHeight > ch;
+  const widest  = maxLineWidth(linesEl);
+  const tooWide = widest > cw;
+
+  if (!tooTall && !tooWide) return;
+
+  const scaleH = ch / Math.max(1, linesEl.scrollHeight);
+  const scaleW = cw / Math.max(1, widest);
+  let scale = Math.min(scaleH, scaleW, 1); // only shrink
+
+  const minScaleTitle = minTitle / origTitlePx;
+  const minScaleBody  = minBody  / origBodyPx;
+  const minScale = Math.min(minScaleTitle, minScaleBody);
+  if (scale < minScale) scale = minScale;
+
+  titlePx = origTitlePx * scale;
+  bodyPx  = origBodyPx  * scale;
+  gapPx   = Math.max(6, origGapPx * (0.85 + 0.15 * scale)); // gentle gap shrink
+
+  apply();
+
+  // tiny safety nudge
+  if (linesEl.scrollHeight > ch || maxLineWidth(linesEl) > cw) {
+    const eps = 0.98;
+    titlePx *= eps; bodyPx *= eps; gapPx *= eps;
+    apply();
+  }
+}
+
+
 
 class PoemUI {
   constructor() {
@@ -216,6 +292,11 @@ class PoemUI {
       this.renderPoem(title, body);
       this.layers.poemLayer.style.display = 'block';
       this.poemOpen = true;
+      addEventListener('resize', () => {
+        if (!this.poemOpen) return;
+        const box = this.layers?.poemLayer?.querySelector('.poem-lines');
+        if (box) fitPoemBlock(box);
+      });
     }catch(e){ console.error('[poem] open error:', e); }
   }
 
@@ -297,7 +378,7 @@ class PoemUI {
         {
           const { dx, dy } = clampDisp(el, sway, vy); // X, Y
           el.style.transform =
-            `translate(-50%, -50%) translateY(${dy.toFixed(2)}px) translateX(${dx.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+            `translate(-50%, -50%) translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
         }
       }
 
@@ -324,7 +405,7 @@ class PoemUI {
           {
             const { dx, dy } = clampDisp(el, sway, vy);
             el.style.transform =
-              `translateY(${dy.toFixed(2)}px) translateX(${dx.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+              `translateY(${dy}px) translateX(${dx}px) rotate(${rotDeg}deg)`;
           }
           idx++;
         });
