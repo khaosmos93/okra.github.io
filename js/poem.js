@@ -63,6 +63,12 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
 
   // Container (.poem-center) defines the max area
   const container = linesEl.parentElement || linesEl;
+
+  // Reserve a little horizontal safety so edge letters can sway/rotate without clipping
+  const SAFE_HPAD = 16;  // must match CSS padding
+  const EXTRA_X   = 6;   // a bit of extra allowance for per‑glyph transform
+  const availW    = Math.max(1, cw - SAFE_HPAD * 2);
+
   const cw = container.clientWidth  || window.innerWidth;
   const ch = container.clientHeight || window.innerHeight;
 
@@ -100,7 +106,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
       const w = line.getBoundingClientRect().width;
       if (w > maxW) maxW = w;
     });
-    const tooWide = maxW > cw;
+    const tooWide = (maxW + EXTRA_X) > availW;
     const tooTall = linesEl.scrollHeight > ch;
     return { tooWide, tooTall };
   };
@@ -118,7 +124,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
     }
 
     // Compute conservative shrink this round
-    const needW = cw / Math.max(1, linesEl.getBoundingClientRect().width);
+    const needW = availW / Math.max(1, linesEl.getBoundingClientRect().width + EXTRA_X);
     const needH = ch / Math.max(1, linesEl.scrollHeight);
     let step = Math.min(needW, needH, 0.96);  // never grow
 
@@ -323,31 +329,35 @@ class PoemUI {
         width:min(92vw,900px);
 
         /* Explicit dynamic height for iOS; fallbacks included */
-        height: 100vh;        /* fallback */
-        height: 100dvh;       /* modern dynamic viewport */
-        max-height: 100vh;    /* fallback */
+        height: 100vh;
+        height: 100dvh;
+        max-height: 100vh;
         max-height: 100dvh;
 
-        overflow:hidden;                 /* default: no scroll when we can fit */
-        pointer-events:auto;             /* allow clicks on poem text */
+        /* Let characters overhang a few px horizontally; keep Y controlled */
+        overflow-y: hidden;
+        overflow-x: visible;
 
-        touch-action: manipulation;         /* reduces double‑tap zoom delays */
+        pointer-events:auto;
+
+        touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
       }
       /* fallback: only if we cannot fit at min font sizes, allow vertical scroll */
       .poem-center.poem-scroll {
-        overflow-y:auto;
-        overflow-x:hidden;
-        -webkit-overflow-scrolling: touch; /* smooth on iOS */
+        overflow-y: auto;     /* vertical scroll only */
+        overflow-x: visible;  /* keep horizontal overhang visible */
+        -webkit-overflow-scrolling: touch;
       }
 
       .poem-lines {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
         gap:${Math.max(10, LINE_GAP - 12)}px;
-        padding:0 12px;
+        /* a touch more side padding so last letters never hug the edge */
+        padding:0 16px;
         width:100%;
         height:100%;
-      }
+      }å
       .poem-line {
         text-align:center; color:#e9eef4; text-shadow:0 1px 0 rgba(0,0,0,.5);
         word-break: break-word;          /* prevent width overflow */
