@@ -231,19 +231,41 @@ class PoemUI {
       window.visualViewport.addEventListener('resize', this.reflowPoemIfOpen);
     }
 
-    // Forward clicks on the poem overlay to the canvas so waves still spawn when a poem is open
+    // Forward taps/clicks on the poem overlay to the canvas so waves spawn while a poem is open
     const forwardToCanvas = (e) => {
-      if (!this.poemOpen) return; // only forward while a poem is visible
-      const ev = new PointerEvent('pointerdown', {
-        clientX: e.clientX,
-        clientY: e.clientY,
-        buttons: e.buttons,
-        pointerId: e.pointerId || 1,
-        pointerType: e.pointerType || 'mouse',
-        bubbles: true,
-        cancelable: true
-      });
-      this.canvas.dispatchEvent(ev);
+      if (!this.poemOpen) return;
+
+      let x, y;
+      // Support touch events (older iOS)
+      if (e.touches && e.touches[0]) {
+        x = e.touches[0].clientX; y = e.touches[0].clientY;
+      } else if (e.changedTouches && e.changedTouches[0]) {
+        x = e.changedTouches[0].clientX; y = e.changedTouches[0].clientY;
+      } else {
+        x = e.clientX; y = e.clientY;
+      }
+
+      // Prefer PointerEvent when available
+      if (window.PointerEvent) {
+        const pev = new PointerEvent('pointerdown', {
+          clientX: x, clientY: y,
+          buttons: (typeof e.buttons === 'number' ? e.buttons : 1),
+          pointerId: e.pointerId || 1,
+          pointerType: e.pointerType || 'touch',
+          bubbles: true, cancelable: true
+        });
+        this.canvas.dispatchEvent(pev);
+      } else {
+        // Fallback to MouseEvent
+        const mev = new MouseEvent('mousedown', {
+          clientX: x, clientY: y,
+          bubbles: true, cancelable: true
+        });
+        this.canvas.dispatchEvent(mev);
+      }
+
+      // Prevent overlay from scrolling on touch (keeps the tap feeling snappy)
+      if (e.cancelable) e.preventDefault();
     };
 
     // The overlay root and its centered content both catch clicks
@@ -260,6 +282,9 @@ class PoemUI {
     }, { passive: false });
     poemLayer.querySelector('.poem-center')
              .addEventListener('pointerdown', forwardToCanvas, true);
+    poemLayer.addEventListener('touchstart', forwardToCanvas, { capture: true, passive: false });
+    poemLayer.querySelector('.poem-center')
+             .addEventListener('touchstart', forwardToCanvas, { capture: true, passive: false });
 
     // re-fit on resize when poem is open
     addEventListener('resize', () => {
@@ -305,6 +330,9 @@ class PoemUI {
 
         overflow:hidden;                 /* default: no scroll when we can fit */
         pointer-events:auto;             /* allow clicks on poem text */
+
+        touch-action: manipulation;         /* reduces double‑tap zoom delays */
+        -webkit-tap-highlight-color: transparent;
       }
       /* fallback: only if we cannot fit at min font sizes, allow vertical scroll */
       .poem-center.poem-scroll {
