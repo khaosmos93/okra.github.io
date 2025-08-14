@@ -4,6 +4,9 @@ export class WaterSim {
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
+    const osc = document.createElement('canvas'); // offscreen canvas
+    const octx = osc.getContext('2d', { alpha: false });
+
     // simulation params
     this.C = 0.36;     // wave speed
     this.DAMP = 0.995; // damping
@@ -82,28 +85,35 @@ export class WaterSim {
 
   render() {
     const W = this.cvs.width, H = this.cvs.height;
-    const cellW = W / this.gw;
-    const cellH = H / this.gh;
-    const image = this.ctx.createImageData(W, H);
-    const pixels = image.data;
-    for (let gy=0; gy<this.gh; gy++) {
-      for (let gx=0; gx<this.gw; gx++) {
-        const v = this.h[this.idx(gx,gy)];
-        const shade = 128 + v * 255; // map height to brightness
-        const c = Math.max(0, Math.min(255, shade));
-        for (let py=0; py<cellH; py++) {
-          for (let px=0; px<cellW; px++) {
-            const x = Math.floor(gx*cellW + px);
-            const y = Math.floor(gy*cellH + py);
-            const idxPix = (y * W + x) * 4;
-            pixels[idxPix] = c;
-            pixels[idxPix+1] = c;
-            pixels[idxPix+2] = c;
-            pixels[idxPix+3] = 255;
-          }
-        }
+
+    // 1) Prepare an offscreen buffer exactly the size of the simulation grid
+    if (osc.width !== this.gw || osc.height !== this.gh) {
+      osc.width = this.gw;
+      osc.height = this.gh;
+    }
+
+    // 2) Fill a gw×gh ImageData with brightness from the height field
+    const img = octx.createImageData(this.gw, this.gh);
+    const px = img.data;
+
+    // Choose a mapping; this one shows mid-gray water with waves bright/dark.
+    // (If you prefer pure black background, see the alternative mapping below.)
+    for (let gy = 0; gy < this.gh; gy++) {
+      for (let gx = 0; gx < this.gw; gx++) {
+        const v = this.h[this.idx(gx, gy)];   // height value (≈ -small..+small)
+        const shade = Math.max(0, Math.min(255, 128 + v * 255));
+        const i = (gy * this.gw + gx) * 4;
+        px[i + 0] = shade;
+        px[i + 1] = shade;
+        px[i + 2] = shade;
+        px[i + 3] = 255;
       }
     }
-    this.ctx.putImageData(image, 0, 0);
+    octx.putImageData(img, 0, 0);
+
+    // 3) Blit to the main canvas, scaled to full size
+    this.ctx.imageSmoothingEnabled = true;     // or false for sharper pixels
+    this.ctx.drawImage(osc, 0, 0, W, H);
   }
+
 }
