@@ -61,20 +61,22 @@ function maxLineWidth(linesEl) {
 function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   if (!linesEl) return;
 
-  // Container (.poem-center) defines the max area
   const container = linesEl.parentElement || linesEl;
   const cw = container.clientWidth  || window.innerWidth;
   const ch = container.clientHeight || window.innerHeight;
 
-  // Reserve a little horizontal safety so edge letters can sway/rotate without clipping
-  const SAFE_HPAD = 16;  // must match CSS padding (padding: 0 16px)
-  const EXTRA_X   = 8;   // a bit of extra allowance for per‑glyph transform
-  const availW    = Math.max(1, cw - SAFE_HPAD * 2);
+  // Safety margins to avoid visual clipping from glyph bob/rotation
+  const SAFE_HPAD = 16;   // match CSS padding: 0 16px
+  const SAFE_VPAD = 24;   // small vertical cushion (px)
+  const EXTRA_X   = 8;    // allow a bit of horizontal overhang in width calc
+  const EXTRA_Y   = 24;   // allow vertical bob in height calc
+
+  const availW = Math.max(1, cw - SAFE_HPAD * 2);
+  const availH = Math.max(1, ch - SAFE_VPAD);
 
   const titleEl = linesEl.querySelector('.poem-line.title');
   const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
 
-  // Cache originals once
   if (!linesEl.dataset.origTitlePx) {
     linesEl.dataset.origTitlePx = String(px(titleEl, 'fontSize') || 22);
     linesEl.dataset.origBodyPx  = String(px(bodyEl,  'fontSize') || 18);
@@ -84,7 +86,6 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   const origBodyPx  = parseFloat(linesEl.dataset.origBodyPx);
   const origGapPx   = parseFloat(linesEl.dataset.origGapPx);
 
-  // Start from originals every time we fit
   let scale  = 1.0;
   let titlePx = origTitlePx;
   let bodyPx  = origBodyPx;
@@ -99,14 +100,13 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   apply();
 
   const fits = () => {
-    // Measure width by checking widest line
     let maxW = 0;
     linesEl.querySelectorAll('.poem-line').forEach(line => {
       const w = line.getBoundingClientRect().width;
       if (w > maxW) maxW = w;
     });
     const tooWide = (maxW + EXTRA_X) > availW;
-    const tooTall = linesEl.scrollHeight > ch;
+    const tooTall = (linesEl.scrollHeight + EXTRA_Y) > availH;
     return { tooWide, tooTall };
   };
 
@@ -118,29 +118,25 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
   while (guard++ < 16) {
     const { tooWide, tooTall } = fits();
     if (!tooWide && !tooTall) {
-      container.classList.remove('poem-scroll'); // perfect fit: no scroll
+      container.classList.remove('poem-scroll');
       return;
     }
 
-    // Compute conservative shrink this round
     const needW = availW / Math.max(1, linesEl.getBoundingClientRect().width + EXTRA_X);
-    const needH = ch / Math.max(1, linesEl.scrollHeight);
-    let step = Math.min(needW, needH, 0.96);  // never grow
+    const needH = availH / Math.max(1, linesEl.scrollHeight + EXTRA_Y);
+    let step = Math.min(needW, needH, 0.96);
 
     const nextScale = Math.max(hardFloor, scale * step);
-
-    // Update sizes
     titlePx = origTitlePx * nextScale;
     bodyPx  = origBodyPx  * nextScale;
     gapPx   = Math.max(4, origGapPx * (0.8 + 0.2 * nextScale));
     apply();
     scale = nextScale;
 
-    // If we’re at the floor and still overflow, bail to scroll fallback
     if (scale === hardFloor) {
       const { tooWide: w2, tooTall: h2 } = fits();
       if (w2 || h2) {
-        container.classList.add('poem-scroll');   // enable vertical scroll
+        container.classList.add('poem-scroll');   // vertical scroll fallback
         container.scrollTop = 0;
       } else {
         container.classList.remove('poem-scroll');
@@ -149,7 +145,6 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
     }
   }
 
-  // Safety fallback (loop guard exhausted)
   container.classList.add('poem-scroll');
   container.scrollTop = 0;
 }
@@ -308,6 +303,9 @@ class PoemUI {
   injectStyles() {
     const s = document.createElement('style');
     s.textContent = `
+      /* NEW: prevent any horizontal scrollbar */
+      html, body { overflow-x: hidden; }
+
       /* Transparent title chips: just text (no background/border) */
       .poem-title {
         position:absolute; transform:translate(-50%,-50%);
@@ -333,12 +331,15 @@ class PoemUI {
         max-height: 100vh;
         max-height: 100dvh;
 
+        /* Safe-area padding to avoid visual crop at edges */
+        padding-top: env(safe-area-inset-top, 0);
+        padding-bottom: env(safe-area-inset-bottom, 0);
+
         /* Let characters overhang a few px horizontally; keep Y controlled */
         overflow-y: hidden;
         overflow-x: visible;
 
         pointer-events:auto;
-
         touch-action: manipulation;
         -webkit-tap-highlight-color: transparent;
       }
@@ -370,13 +371,17 @@ class PoemUI {
         word-break: break-word;           /* prevent width overflow */
         overflow-wrap: anywhere;
       }
-      .poem-line.title{
+      .poem-line.title {
         font-weight:800;
         font-size:${TITLE_SIZE}px;
         letter-spacing:.2px;
         color:#f2f7ff;
       }
-      .poem-line.body { font-weight:500; font-size:${BODY_SIZE}px; letter-spacing:.15px; }
+      .poem-line.body {
+        font-weight:500;
+        font-size:${BODY_SIZE}px;
+        letter-spacing:.15px;
+      }
       .poem-word { display:inline-block; }
       .poem-char { display:inline-block; will-change: transform, opacity; }
     `;
