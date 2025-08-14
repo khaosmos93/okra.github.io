@@ -63,14 +63,13 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
 
   // Container (.poem-center) defines the max area
   const container = linesEl.parentElement || linesEl;
-
-  // Reserve a little horizontal safety so edge letters can sway/rotate without clipping
-  const SAFE_HPAD = 16;  // must match CSS padding
-  const EXTRA_X   = 8;   // a bit of extra allowance for per‑glyph transform
-  const availW    = Math.max(1, cw - SAFE_HPAD * 2);
-
   const cw = container.clientWidth  || window.innerWidth;
   const ch = container.clientHeight || window.innerHeight;
+
+  // Reserve a little horizontal safety so edge letters can sway/rotate without clipping
+  const SAFE_HPAD = 20;  // must match CSS padding (padding: 0 20px)
+  const EXTRA_X   = 8;   // a bit of extra allowance for per‑glyph transform
+  const availW    = Math.max(1, cw - SAFE_HPAD * 2);
 
   const titleEl = linesEl.querySelector('.poem-line.title');
   const bodyEl  = linesEl.querySelector('.poem-line.body') || titleEl;
@@ -231,18 +230,20 @@ class PoemUI {
       </div>`;
     document.body.appendChild(poemLayer);
 
-    // iOS visual viewport changes (URL bar show/hide, rotation) — keep poem sized correctly
+    // Keep poem sized correctly on iOS visual viewport changes
     addEventListener('orientationchange', this.reflowPoemIfOpen);
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', this.reflowPoemIfOpen);
     }
 
-    // Forward taps/clicks on the poem overlay to the canvas so waves spawn while a poem is open
+    // Prevent double-trigger from touchstart → pointerdown on iOS
+    let justForwardedTouch = 0;
     const forwardToCanvas = (e) => {
       if (!this.poemOpen) return;
+      const now = performance.now();
+      if (e.type === 'pointerdown' && now - justForwardedTouch < 60) return;
 
       let x, y;
-      // Support touch events (older iOS)
       if (e.touches && e.touches[0]) {
         x = e.touches[0].clientX; y = e.touches[0].clientY;
       } else if (e.changedTouches && e.changedTouches[0]) {
@@ -251,57 +252,55 @@ class PoemUI {
         x = e.clientX; y = e.clientY;
       }
 
-      // Prefer PointerEvent when available
       if (window.PointerEvent) {
-        const pev = new PointerEvent('pointerdown', {
+        this.canvas.dispatchEvent(new PointerEvent('pointerdown', {
           clientX: x, clientY: y,
           buttons: (typeof e.buttons === 'number' ? e.buttons : 1),
           pointerId: e.pointerId || 1,
           pointerType: e.pointerType || 'touch',
           bubbles: true, cancelable: true
-        });
-        this.canvas.dispatchEvent(pev);
+        }));
       } else {
-        // Fallback to MouseEvent
-        const mev = new MouseEvent('mousedown', {
+        this.canvas.dispatchEvent(new MouseEvent('mousedown', {
           clientX: x, clientY: y,
           bubbles: true, cancelable: true
-        });
-        this.canvas.dispatchEvent(mev);
+        }));
       }
 
-      // Prevent overlay from scrolling on touch (keeps the tap feeling snappy)
-      if (e.cancelable) e.preventDefault();
+      if (e.type.startsWith('touch') && e.cancelable) e.preventDefault();
+      if (e.type.startsWith('touch')) justForwardedTouch = now;
     };
 
-    // The overlay root and its centered content both catch clicks
+    // Forward taps on overlay to canvas
     poemLayer.addEventListener('pointerdown', forwardToCanvas, true);
-    // Double-tap anywhere on the overlay to close the poem (iOS-friendly Escape)
-    let lastTapTime = 0;
-    poemLayer.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTapTime < 300) { // double tap detected (300ms threshold)
-        e.preventDefault();
-        this.closePoem();
-      }
-      lastTapTime = now;
-    }, { passive: false });
     poemLayer.querySelector('.poem-center')
              .addEventListener('pointerdown', forwardToCanvas, true);
     poemLayer.addEventListener('touchstart', forwardToCanvas, { capture: true, passive: false });
     poemLayer.querySelector('.poem-center')
              .addEventListener('touchstart', forwardToCanvas, { capture: true, passive: false });
 
-    // re-fit on resize when poem is open
+    // Double-tap anywhere to close poem
+    let lastTapTime = 0;
+    poemLayer.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTapTime < 300) {
+        e.preventDefault();
+        this.closePoem();
+      }
+      lastTapTime = now;
+    }, { passive: false });
+
+    // Re-fit on resize when poem is open
     addEventListener('resize', () => {
       if (!this.poemOpen) return;
       const box = this.layers?.poemLayer?.querySelector('.poem-lines');
       if (box) fitPoemBlock(box);
     });
 
-    // Close poem with ESC or click on canvas
-    addEventListener('keydown', (e)=>{ if (e.key === 'Escape') this.closePoem(); });
-    // this.canvas.addEventListener('pointerdown', ()=>{ if (this.poemOpen) this.closePoem(); }, true);
+    // Close poem with ESC
+    addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') this.closePoem();
+    });
 
     return { titleLayer, poemLayer };
   }
@@ -366,13 +365,16 @@ class PoemUI {
         text-align: center;
         color: #e9eef4;
         text-shadow: 0 1px 0 rgba(0,0,0,.5);
-        -webkit-text-stroke: 0.8px black;
+        -webkit-text-stroke: 1px black;
         paint-order: stroke fill;
         word-break: break-word;           /* prevent width overflow */
         overflow-wrap: anywhere;
       }
       .poem-line.title{
-        font-weight:800; font-size:${TITLE_SIZE}px; letter-spacing:.2px; color:#f2f7ff;
+        font-weight:800;
+        font-size:${TITLE_SIZE}px;
+        letter-spacing:.2px;
+        color:#f2f7ff;
       }
       .poem-line.body { font-weight:500; font-size:${BODY_SIZE}px; letter-spacing:.15px; }
       .poem-word { display:inline-block; }
