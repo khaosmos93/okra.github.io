@@ -25,6 +25,24 @@ const LINE_GAP      = 34;
 const TITLE_SIZE    = 22;
 const BODY_SIZE     = 18;
 
+// --- clamp helpers (movement ≤ fontSize * 1.5) ---
+function fontPx(el){
+  return parseFloat(getComputedStyle(el).fontSize) || 16;
+}
+function clampDisp(el, dx, dy, factor = 1.5){
+  const max = fontPx(el) * factor;
+  // per‑axis clamp
+  let cx = Math.max(-max, Math.min(max, dx));
+  let cy = Math.max(-max, Math.min(max, dy));
+  // radial clamp (just in case combined > max)
+  const mag = Math.hypot(cx, cy);
+  if (mag > max){
+    const s = max / mag;
+    cx *= s; cy *= s;
+  }
+  return { dx: cx, dy: cy };
+}
+
 class PoemUI {
   constructor() {
     this.canvas = document.getElementById(CANVAS_ID);
@@ -276,7 +294,11 @@ class PoemUI {
 
         el.style.opacity = alpha.toFixed(3);
         // Titles are absolutely positioned via left/top; we add transform-only motion
-        el.style.transform = `translate(-50%, -50%) translateY(${vy.toFixed(2)}px) translateX(${sway.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+        {
+          const { dx, dy } = clampDisp(el, sway, vy); // X, Y
+          el.style.transform =
+            `translate(-50%, -50%) translateY(${dy.toFixed(2)}px) translateX(${dx.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+        }
       }
 
       // Float poem glyphs if poem is open (req #1 & #2 already handled)
@@ -299,7 +321,11 @@ class PoemUI {
           if (alpha > 1) alpha = 1;
 
           el.style.opacity = alpha.toFixed(3);
-          el.style.transform = `translateY(${vy.toFixed(2)}px) translateX(${sway.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+          {
+            const { dx, dy } = clampDisp(el, sway, vy);
+            el.style.transform =
+              `translateY(${dy.toFixed(2)}px) translateX(${dx.toFixed(2)}px) rotate(${rotDeg.toFixed(2)}deg)`;
+          }
           idx++;
         });
       }
