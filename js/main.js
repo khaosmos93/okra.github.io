@@ -1,6 +1,7 @@
 import { WaterSim } from './water.js';
 
 const sim = new WaterSim(document.getElementById('water'));
+window.WATER = sim; // ← make the sim accessible to the poem overlay
 
 function toGrid(e){
   const r = sim.cvs.getBoundingClientRect();
