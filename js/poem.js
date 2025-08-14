@@ -66,7 +66,7 @@ function fitPoemBlock(linesEl, { minTitle = 14, minBody = 12 } = {}) {
 
   // Reserve a little horizontal safety so edge letters can sway/rotate without clipping
   const SAFE_HPAD = 16;  // must match CSS padding
-  const EXTRA_X   = 6;   // a bit of extra allowance for per‑glyph transform
+  const EXTRA_X   = 8;   // a bit of extra allowance for per‑glyph transform
   const availW    = Math.max(1, cw - SAFE_HPAD * 2);
 
   const cw = container.clientWidth  || window.innerWidth;
@@ -354,7 +354,7 @@ class PoemUI {
         display:flex; flex-direction:column; align-items:center; justify-content:center;
         gap:${Math.max(10, LINE_GAP - 12)}px;
         /* a touch more side padding so last letters never hug the edge */
-        padding:0 16px;
+        padding:0 20px;
         width:100%;
         height:100%;
       }å
