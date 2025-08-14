@@ -20,3 +20,13 @@ canvas#water {
   opacity: .8;
   user-select: none;
 }
+
+/* Center the poem modal content perfectly */
+#poem-modal .poem-modal-content {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+/* Crisp text on dark water */
+.poem-char { will-change: transform, opacity; display: inline-block; }
