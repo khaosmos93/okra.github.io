@@ -10,10 +10,12 @@
     return `${url}${sep}key=${encodeURIComponent(KEY)}`;
   };
 
-  // --- 2) PRIMARY STYLE (needs MapTiler key) ---------------------------------
-  const primaryStyle = {
+  // --- 2) STYLE: GLOBE + SKY + HILLSHADE + WATER + CONTOURS ------------------
+  // Hillshade is grayscale; we tune contrast/brightness so low altitudes are darker
+  // and high altitudes are brighter/whiter. Water is drawn above hillshade.
+  const style = {
     version: 8,
-    projection: { name: "globe" },
+    projection: { name: "globe" }, // enforced again on 'load' for safety
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       omt: {
@@ -24,7 +26,7 @@
         type: "raster",
         tiles: [ withKey("https://api.maptiler.com/tiles/hillshade/{z}/{x}/{y}.webp?key={key}") ],
         tileSize: 512,
-        attribution: "© MapTiler © OpenStreetMap contributors"
+        attribution: "\u00A9 MapTiler \u00A9 OpenStreetMap contributors"
       },
       contours: {
         type: "vector",
@@ -32,28 +34,38 @@
       }
     },
     layers: [
+      // background (pure black)
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
+
+      // hillshade under everything else (grayscale terrain)
       {
         id: "hillshade",
         type: "raster",
         source: "hillshade",
         paint: {
+          // high altitude => whiter; low => darker
           "raster-opacity": 1.0,
-          "raster-contrast": 0.75,
+          "raster-contrast": 0.9,
           "raster-brightness-min": 0.0,
-          "raster-brightness-max": 1.35,  // brighter peaks
+          "raster-brightness-max": 1.35,
           "raster-saturation": 0,
-          "raster-hue-rotate": 0,
-          "raster-resampling": "linear"
+          "raster-hue-rotate": 0
         }
       },
+
+      // oceans & big lakes (deep blue) — sits ABOVE hillshade
       {
         id: "water-fill",
         type: "fill",
         source: "omt",
         "source-layer": "water",
-        paint: { "fill-color": "#0a2a66", "fill-opacity": 1.0 }
+        paint: {
+          "fill-color": "#0a2a66",
+          "fill-opacity": 1.0
+        }
       },
+
+      // rivers
       {
         id: "waterway-line",
         type: "line",
@@ -65,6 +77,8 @@
           "line-opacity": 0.9
         }
       },
+
+      // contours (index + regular)
       {
         id: "contours-index",
         type: "line",
@@ -92,87 +106,54 @@
     ]
   };
 
-  // --- 3) FALLBACK STYLE (NO KEY) -------------------------------------------
-  // Uses MapLibre demo vector tiles + Esri World Hillshade raster.
-  const fallbackStyle = {
-    version: 8,
-    projection: { name: "globe" },
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-    sources: {
-      demo: {
-        type: "vector",
-        url: "https://demotiles.maplibre.org/tiles/tiles.json" // water + waterway exist
-      },
-      esriHillshade: {
-        type: "raster",
-        tiles: [
-          "https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"
-        ],
-        tileSize: 256,
-        attribution: "Esri — World Hillshade; MapLibre demo tiles"
-      }
-    },
-    layers: [
-      { id: "bg", type: "background", paint: { "background-color": "#000000" } },
-      {
-        id: "hillshade",
-        type: "raster",
-        source: "esriHillshade",
-        paint: {
-          "raster-opacity": 1.0,
-          "raster-contrast": 0.8,
-          "raster-brightness-min": 0.0,
-          "raster-brightness-max": 1.35, // push highs toward white
-          "raster-saturation": 0,
-          "raster-hue-rotate": 0
-        }
-      },
-      {
-        id: "water-fill",
-        type: "fill",
-        source: "demo",
-        "source-layer": "water",
-        paint: { "fill-color": "#0a2a66", "fill-opacity": 1.0 }
-      },
-      {
-        id: "waterway-line",
-        type: "line",
-        source: "demo",
-        "source-layer": "waterway",
-        paint: {
-          "line-color": "#0f3d99",
-          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.2, 6, 0.6, 10, 1.2, 14, 2.0],
-          "line-opacity": 0.9
-        }
-      }
-      // contours are omitted in fallback (no free vector contour source)
-    ]
-  };
-
-  // --- 4) MAP INIT -----------------------------------------------------------
+  // --- 3) MAP INIT -----------------------------------------------------------
   const map = new maplibregl.Map({
     container: "map",
-    style: primaryStyle,
+    style,
     center: [0, 20],
-    zoom: 1.2,
+    zoom: 1.8,
     hash: true,
-    antialias: true,
     attributionControl: false
-  });
-
-  // Force globe even if some environments ignore projection in style
-  map.once("styledata", () => {
-    if (typeof map.setProjection === "function") {
-      try { map.setProjection({ name: "globe" }); } catch (_) {}
-    }
   });
 
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-  // On load: UI skin + load photos
+  // Keep layer order sane (water above hillshade, etc.)
+  function ensureLayerOrder() {
+    const order = ['bg', 'hillshade', 'water-fill', 'waterway-line', 'contours-regular', 'contours-index', 'sky'];
+    order.forEach((id, i) => {
+      if (!map.getLayer(id)) return;
+      const before = order.slice(i + 1).find(next => map.getLayer(next));
+      try { map.moveLayer(id, before || undefined); } catch (_) {}
+    });
+  }
+
   map.on("load", () => {
+    // enforce globe (some environments ignore projection in JSON on first paint)
+    if (typeof map.setProjection === 'function') {
+      try { map.setProjection({ name: 'globe' }); } catch (_) {}
+    }
+
+    // add a sky so first frame isn't pure black
+    if (!map.getLayer('sky')) {
+      map.addLayer({
+        id: 'sky',
+        type: 'sky',
+        paint: {
+          'sky-type': 'gradient',
+          'sky-color': '#02162f',
+          'sky-horizon-blend': 0.4,
+          'sky-atmosphere-color': '#02162f',
+          'sky-atmosphere-sun-intensity': 10
+        }
+      }); // sky renders behind the world
+    }
+
+    ensureLayerOrder();
+
+    // Dark UI for controls
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
         background: rgba(15,15,20,0.6);
@@ -188,30 +169,22 @@
     s.textContent = css;
     document.head.appendChild(s);
 
-    ensureExif().then(loadTravelPhotosJSON);
+    // load photos only from travel/photos.json
+    loadTravelPhotosJSON();
   });
 
-  // --- 5) AUTO-FALLBACK ON 403 / KEY ISSUES ---------------------------------
-  let fellBack = false;
+  // Helpful message if key missing or blocked
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
-
+    const is403 = /(^|\s)403(\s|$)/.test(String(err.status || err.message || ""));
     const isMapTiler = /api\.maptiler\.com/.test(err.url);
-    const is403 = (err.status === 403) || /(^|\s)403(\s|$)/.test(String(err.message || ""));
-    if (isMapTiler && is403 && !fellBack) {
-      fellBack = true;
-      console.warn("MapTiler blocked (403). Switching to fallback style without key.");
-      map.setStyle(fallbackStyle);
-      map.once("styledata", () => {
-        if (typeof map.setProjection === "function") {
-          try { map.setProjection({ name: "globe" }); } catch (_) {}
-        }
-      });
+    if (isMapTiler && (is403 || !KEY)) {
+      console.warn("MapTiler request blocked or no key. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; and allow your domain in key settings.");
     }
   });
 
-  // --- 6) LOAD PHOTOS ONLY FROM travel/photos.json ---------------------------
+  // --- 4) LOAD PHOTOS ONLY FROM travel/photos.json ---------------------------
   const statusEl = document.getElementById("status");
 
   async function loadTravelPhotosJSON() {
@@ -246,18 +219,6 @@
     }
   }
 
-  // --- 7) EXIF HELPERS -------------------------------------------------------
-  function ensureExif() {
-    if (window.ExifReader) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = "https://unpkg.com/exifreader@4/dist/exif-reader.min.js";
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("Failed to load ExifReader"));
-      document.head.appendChild(s);
-    });
-  }
-
   function dmsToDeg(dms, ref) {
     if (!Array.isArray(dms) || dms.length !== 3) return null;
     const toNum = (v) => (typeof v === "number" ? v : (v.numerator / v.denominator));
@@ -267,8 +228,16 @@
 
   async function readExifAndPlaceFromURL(url, name) {
     try {
-      const buffer = await fetch(url, { cache: "no-store" }).then(r => r.arrayBuffer());
-      if (!window.ExifReader) throw new Error("ExifReader not available");
+      // ensure EXIF library is present
+      if (typeof ExifReader === "undefined") {
+        console.warn("ExifReader not loaded; skipping EXIF parse for", url);
+        return false;
+      }
+
+      const buffer = await fetch(url, { cache: "no-store" }).then(r => {
+        if (!r.ok) throw new Error(`Fetch failed ${r.status}`);
+        return r.arrayBuffer();
+      });
       const tags = ExifReader.load(buffer);
 
       const lat = tags.GPSLatitude?.description ?? tags.GPSLatitude?.value;
@@ -276,10 +245,8 @@
       const lon = tags.GPSLongitude?.description ?? tags.GPSLongitude?.value;
       const lonRef = tags.GPSLongitudeRef?.value ?? tags.GPSLongitudeRef?.description;
 
-      const latDeg = (typeof lat === "number") ? lat :
-        dmsToDeg(lat, typeof latRef === "string" ? latRef : (latRef && latRef.description));
-      const lonDeg = (typeof lon === "number") ? lon :
-        dmsToDeg(lon, typeof lonRef === "string" ? lonRef : (lonRef && lonRef.description));
+      const latDeg = (typeof lat === "number") ? lat : dmsToDeg(lat, typeof latRef === "string" ? latRef : (latRef && latRef.description));
+      const lonDeg = (typeof lon === "number") ? lon : dmsToDeg(lon, typeof lonRef === "string" ? lonRef : (lonRef && lonRef.description));
 
       if (!isFinite(latDeg) || !isFinite(lonDeg)) {
         console.warn("No valid GPS in:", name || url);

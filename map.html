@@ -38,14 +38,12 @@
 
   <!-- MapLibre -->
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
-
-  <!-- Try to load ExifReader up-front -->
+  <!-- EXIF reader (exposes global `ExifReader`) -->
   <script src="https://unpkg.com/exifreader@4/dist/exif-reader.min.js"></script>
 
-  <!-- Optional: set your MapTiler key here, or pass it as ?key=YOUR_KEY in the URL -->
+  <!-- Set your MapTiler key here (or pass ?key=YOUR_KEY in the URL) -->
   <script>
-    // Replace with your key or use ?key=... in the URL
-    window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM";
+    window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM"; /* optional: put your key here */
   </script>
 
   <script src="js/globe-altitude-photos.js"></script>
