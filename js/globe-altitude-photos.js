@@ -11,9 +11,11 @@
   };
 
   // --- 2) STYLE: GLOBE + WATER + HILLSHADE + CONTOURS ------------------------
+  // Hillshade is grayscale; we tune contrast/brightness so low altitudes look darker and
+  // high altitudes closer to white (keeping ocean still deep blue).
   const style = {
     version: 8,
-    projection: { name: "globe" }, // feel free to switch to "lambertAzimuthalEqualArea"
+    projection: { name: "globe" }, // change to { name: "lambertAzimuthalEqualArea" } if you prefer
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       omt: {
@@ -34,7 +36,7 @@
     layers: [
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
 
-      // Grayscale relief: low = dark, high = bright (white)
+      // Grayscale relief: low = dark, high = bright
       {
         id: "hillshade",
         type: "raster",
@@ -133,11 +135,11 @@
     s.textContent = css;
     document.head.appendChild(s);
 
-    // Optional: auto-load hosted photos listed in /travel/photos.json
-    tryAutoLoadTravelPhotos();
+    // Now only load photos from travel/photos.json
+    loadTravelPhotosJSON();
   });
 
-  // Friendly message if MapTiler key is missing or blocked
+  // Helpful message if key missing or blocked
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
@@ -148,44 +150,47 @@
     }
   });
 
-  // --- 4) PHOTOS FROM EXIF GPS ----------------------------------------------
-  const inputEl = document.getElementById("photo-input");
-  const dropHint = document.getElementById("drop-hint");
+  // --- 4) LOAD PHOTOS ONLY FROM travel/photos.json ---------------------------
+  const statusEl = document.getElementById("status");
+
+  async function loadTravelPhotosJSON() {
+    try {
+      statusEl.hidden = false;
+      statusEl.textContent = "Loading photos from travel/photos.json…";
+
+      const res = await fetch("travel/photos.json", { cache: "no-store" });
+      if (!res.ok) {
+        statusEl.textContent = "No travel/photos.json found (or not accessible).";
+        return;
+      }
+      const list = await res.json();
+      if (!Array.isArray(list) || list.length === 0) {
+        statusEl.textContent = "travel/photos.json is empty (no filenames).";
+        return;
+      }
+
+      let placed = 0;
+      for (const name of list) {
+        if (typeof name !== "string") continue;
+        // Same-origin image URL (GitHub Pages): ensure path matches your repo structure
+        await readExifAndPlaceFromURL(`travel/${encodeURIComponent(name)}`, name)
+          .then((ok) => { if (ok) placed++; });
+      }
+      statusEl.textContent = placed > 0
+        ? `Placed ${placed} photo${placed>1?"s":""} from travel/photos.json.`
+        : "No images in travel/photos.json had valid GPS EXIF.";
+      setTimeout(() => { statusEl.hidden = true; }, 2500);
+    } catch (err) {
+      console.error("Failed to load travel/photos.json", err);
+      statusEl.textContent = "Error loading travel/photos.json (see console).";
+    }
+  }
 
   function dmsToDeg(dms, ref) {
     if (!Array.isArray(dms) || dms.length !== 3) return null;
     const toNum = (v) => (typeof v === "number" ? v : (v.numerator / v.denominator));
     const deg = toNum(dms[0]) + toNum(dms[1]) / 60 + toNum(dms[2]) / 3600;
     return (ref === "S" || ref === "W") ? -deg : deg;
-  }
-
-  async function readExifAndPlaceFromFileObj(file) {
-    try {
-      const buffer = await file.arrayBuffer();
-      const tags = ExifReader.load(buffer);
-
-      const lat = tags.GPSLatitude?.description ?? tags.GPSLatitude?.value;
-      const latRef = tags.GPSLatitudeRef?.value ?? tags.GPSLatitudeRef?.description;
-      const lon = tags.GPSLongitude?.description ?? tags.GPSLongitude?.value;
-      const lonRef = tags.GPSLongitudeRef?.value ?? tags.GPSLongitudeRef?.description;
-
-      let latDeg = null, lonDeg = null;
-      if (typeof lat === "number" && typeof lon === "number") {
-        latDeg = lat; lonDeg = lon;
-      } else {
-        latDeg = dmsToDeg(lat, typeof latRef === "string" ? latRef : (latRef && latRef.description));
-        lonDeg = dmsToDeg(lon, typeof lonRef === "string" ? lonRef : (lonRef && lonRef.description));
-      }
-      if (!isFinite(latDeg) || !isFinite(lonDeg)) {
-        console.warn("No valid GPS in:", file.name);
-        return;
-      }
-
-      const imgURL = URL.createObjectURL(file);
-      addPhotoMarker(imgURL, file.name, lonDeg, latDeg);
-    } catch (err) {
-      console.error("EXIF read failed", err);
-    }
   }
 
   async function readExifAndPlaceFromURL(url, name) {
@@ -203,11 +208,13 @@
 
       if (!isFinite(latDeg) || !isFinite(lonDeg)) {
         console.warn("No valid GPS in:", name || url);
-        return;
+        return false;
       }
       addPhotoMarker(url, name || url.split("/").pop(), lonDeg, latDeg);
+      return true;
     } catch (err) {
       console.error("EXIF read failed for", url, err);
+      return false;
     }
   }
 
@@ -237,45 +244,6 @@
     if (!addPhotoMarker._hasFlown) {
       addPhotoMarker._hasFlown = true;
       map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
-    }
-  }
-
-  // File input
-  inputEl.addEventListener("change", (e) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach(readExifAndPlaceFromFileObj);
-  });
-
-  // Drag & drop
-  document.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    document.getElementById("drop-hint").classList.add("show");
-  });
-  document.addEventListener("dragleave", (e) => {
-    if (e.target === document || e.target === document.body) {
-      document.getElementById("drop-hint").classList.remove("show");
-    }
-  });
-  document.addEventListener("drop", (e) => {
-    e.preventDefault();
-    document.getElementById("drop-hint").classList.remove("show");
-    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith("image/"));
-    files.forEach(readExifAndPlaceFromFileObj);
-  });
-
-  // Optional: auto-load hosted images listed in /travel/photos.json
-  async function tryAutoLoadTravelPhotos() {
-    try {
-      const res = await fetch("travel/photos.json", { cache: "no-store" });
-      if (!res.ok) return; // photos.json is optional
-      const list = await res.json();
-      if (!Array.isArray(list)) return;
-      for (const name of list) {
-        if (typeof name !== "string") continue;
-        await readExifAndPlaceFromURL(`travel/${encodeURIComponent(name)}`, name);
-      }
-    } catch (_) {
-      // ignore if not present
     }
   }
 })();

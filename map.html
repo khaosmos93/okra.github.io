@@ -10,29 +10,14 @@
   html, body { height: 100%; margin: 0; background:#000; }
   #map { position: absolute; inset: 0; }
 
-  /* Minimal UI */
-  #ui {
-    position: fixed; left: 12px; top: 12px; z-index: 5;
-    display: flex; gap: 8px; align-items: center;
+  /* Small toast for status/messages */
+  #status {
+    position: fixed; left: 12px; bottom: 12px; z-index: 5;
     background: rgba(10,10,16,.6); color:#ddd;
     padding: 8px 10px; border-radius: 10px;
     border: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(6px);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 14px;
-  }
-  #photo-input { color:#ddd; }
-
-  /* Drag hint */
-  #drop-hint {
-    position: fixed; inset: 0; display: none; z-index: 4;
-    align-items: center; justify-content: center; pointer-events: none;
-    background: rgba(0,0,0,.35);
-  }
-  #drop-hint.show { display: flex; }
-  #drop-hint .bubble {
-    color:#fff; background: rgba(10,10,16,.7);
-    border: 1px solid rgba(255,255,255,.15);
-    padding: 16px 20px; border-radius: 14px; backdrop-filter: blur(6px);
-    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size: 13px;
+    max-width: min(80vw, 520px);
   }
 
   /* Photo markers */
@@ -49,13 +34,7 @@
 </head>
 <body>
   <div id="map"></div>
-
-  <div id="ui">
-    <label>Photos: <input id="photo-input" type="file" accept="image/*" multiple /></label>
-    <span style="opacity:.75">or drop images anywhere</span>
-  </div>
-
-  <div id="drop-hint"><div class="bubble">Drop images to add them to the map</div></div>
+  <div id="status" hidden>Loading photos from <code>travel/photos.json</code>…</div>
 
   <!-- MapLibre -->
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
@@ -65,6 +44,6 @@
   <!-- Optional: set your MapTiler key here, or pass it as ?key=YOUR_KEY in the URL -->
   <script>window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM"; </script>
 
-  <script src="js/blue-contours-map.js"></script>
+  <script src="js/globe-altitude-photos.js"></script>
 </body>
 </html>
