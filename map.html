@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Blue Water + Contours</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <link href="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.css" rel="stylesheet">
+  <style>
+    html, body { height:100%; margin:0; overflow:hidden; background:#000; }
+    #map { position:fixed; inset:0; }
+    .ml-control { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Put your key (or leave blank to test with a watermark) in js/map.config.js -->
+  <script src="js/map.config.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@3.6.1/dist/maplibre-gl.js"></script>
+  <script src="js/blue-contours-map.js"></script>
+</body>
+</html>
