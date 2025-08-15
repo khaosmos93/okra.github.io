@@ -6,43 +6,20 @@
 <title>Travel</title>
 <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 <style>
-  body, html {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    background: #000;
-  }
-  #map {
-    width: 100%;
-    height: 100%;
-  }
+  html, body { margin:0; padding:0; height:100%; background:#000; }
+  #map { width:100%; height:100%; }
 </style>
 </head>
 <body>
-<div id="map"></div>
+  <div id="map"></div>
 
-<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
-<!-- Optional: Put your MapTiler key in a global var -->
-<script>
-  window.MAPTILER_KEY = ""; // <-- your MapTiler key here
-</script>
+  <!-- Optional: put your MapTiler key here -->
+  <script>
+    window.MAPTILER_KEY = ""; /* your key (or leave blank if not using MapTiler-hosted tiles) */
+  </script>
 
-<!-- Projection hook: overwrite maplibregl.Map to run setProjection after init -->
-<script>
-(function(){
-  const OriginalMap = maplibregl.Map;
-  maplibregl.Map = function(opts) {
-    const m = new OriginalMap(opts);
-    m.on("load", () => {
-      m.setProjection({ name: "vertical-perspective" });
-    });
-    return m;
-  };
-  maplibregl.Map.prototype = OriginalMap.prototype;
-})();
-</script>
-
-<script src="js/blue-contours-map.js"></script>
+  <script src="js/blue-contours-map.js"></script>
 </body>
 </html>
