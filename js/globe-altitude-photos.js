@@ -10,12 +10,10 @@
     return `${url}${sep}key=${encodeURIComponent(KEY)}`;
   };
 
-  // --- 2) STYLE: GLOBE + WATER + HILLSHADE + CONTOURS ------------------------
-  // Hillshade is a pre-rendered grayscale shaded relief. We bias contrast/brightness so
-  // low areas look darker and highlands appear lighter (more “white” overall).
-  const style = {
+  // --- 2) PRIMARY STYLE (needs MapTiler key) ---------------------------------
+  const primaryStyle = {
     version: 8,
-    projection: { name: "globe" },                 // ensure globe in the style
+    projection: { name: "globe" },
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       omt: {
@@ -26,7 +24,7 @@
         type: "raster",
         tiles: [ withKey("https://api.maptiler.com/tiles/hillshade/{z}/{x}/{y}.webp?key={key}") ],
         tileSize: 512,
-        attribution: "\u00A9 MapTiler \u00A9 OpenStreetMap contributors"
+        attribution: "© MapTiler © OpenStreetMap contributors"
       },
       contours: {
         type: "vector",
@@ -35,36 +33,27 @@
     },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
-
-      // Grayscale relief: tune to make high altitude appear lighter
       {
         id: "hillshade",
         type: "raster",
         source: "hillshade",
         paint: {
           "raster-opacity": 1.0,
-          "raster-contrast": 0.65,       // stronger contrast
+          "raster-contrast": 0.75,
           "raster-brightness-min": 0.0,
-          "raster-brightness-max": 1.2,  // bias brighter peaks toward white
+          "raster-brightness-max": 1.35,  // brighter peaks
           "raster-saturation": 0,
           "raster-hue-rotate": 0,
           "raster-resampling": "linear"
         }
       },
-
-      // Deep blue water (oceans & large lakes) on top of hillshade
       {
         id: "water-fill",
         type: "fill",
         source: "omt",
         "source-layer": "water",
-        paint: {
-          "fill-color": "#0a2a66",
-          "fill-opacity": 1.0
-        }
+        paint: { "fill-color": "#0a2a66", "fill-opacity": 1.0 }
       },
-
-      // Rivers & waterways
       {
         id: "waterway-line",
         type: "line",
@@ -76,8 +65,6 @@
           "line-opacity": 0.9
         }
       },
-
-      // Contours
       {
         id: "contours-index",
         type: "line",
@@ -87,8 +74,7 @@
         paint: {
           "line-color": "#ffffff",
           "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"],
-            2, 0.2, 6, 0.5, 10, 0.9, 12, 1.3, 14, 1.7]
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.2, 6, 0.5, 10, 0.9, 12, 1.3, 14, 1.7]
         }
       },
       {
@@ -106,20 +92,75 @@
     ]
   };
 
-  // --- 3) MAP INIT -----------------------------------------------------------
+  // --- 3) FALLBACK STYLE (NO KEY) -------------------------------------------
+  // Uses MapLibre demo vector tiles + Esri World Hillshade raster.
+  const fallbackStyle = {
+    version: 8,
+    projection: { name: "globe" },
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+    sources: {
+      demo: {
+        type: "vector",
+        url: "https://demotiles.maplibre.org/tiles/tiles.json" // water + waterway exist
+      },
+      esriHillshade: {
+        type: "raster",
+        tiles: [
+          "https://services.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}"
+        ],
+        tileSize: 256,
+        attribution: "Esri — World Hillshade; MapLibre demo tiles"
+      }
+    },
+    layers: [
+      { id: "bg", type: "background", paint: { "background-color": "#000000" } },
+      {
+        id: "hillshade",
+        type: "raster",
+        source: "esriHillshade",
+        paint: {
+          "raster-opacity": 1.0,
+          "raster-contrast": 0.8,
+          "raster-brightness-min": 0.0,
+          "raster-brightness-max": 1.35, // push highs toward white
+          "raster-saturation": 0,
+          "raster-hue-rotate": 0
+        }
+      },
+      {
+        id: "water-fill",
+        type: "fill",
+        source: "demo",
+        "source-layer": "water",
+        paint: { "fill-color": "#0a2a66", "fill-opacity": 1.0 }
+      },
+      {
+        id: "waterway-line",
+        type: "line",
+        source: "demo",
+        "source-layer": "waterway",
+        paint: {
+          "line-color": "#0f3d99",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.2, 6, 0.6, 10, 1.2, 14, 2.0],
+          "line-opacity": 0.9
+        }
+      }
+      // contours are omitted in fallback (no free vector contour source)
+    ]
+  };
+
+  // --- 4) MAP INIT -----------------------------------------------------------
   const map = new maplibregl.Map({
     container: "map",
-    style,
+    style: primaryStyle,
     center: [0, 20],
-    zoom: 1.2,                     // start at a globe-friendly zoom
-    pitch: 0,
-    bearing: 0,
+    zoom: 1.2,
     hash: true,
     antialias: true,
     attributionControl: false
   });
 
-  // If some environments ignore projection in style, force it here too:
+  // Force globe even if some environments ignore projection in style
   map.once("styledata", () => {
     if (typeof map.setProjection === "function") {
       try { map.setProjection({ name: "globe" }); } catch (_) {}
@@ -130,8 +171,8 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
+  // On load: UI skin + load photos
   map.on("load", () => {
-    // Dark UI for controls
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
         background: rgba(15,15,20,0.6);
@@ -147,22 +188,30 @@
     s.textContent = css;
     document.head.appendChild(s);
 
-    // Load photos only from travel/photos.json
     ensureExif().then(loadTravelPhotosJSON);
   });
 
-  // Helpful message if key missing or blocked
+  // --- 5) AUTO-FALLBACK ON 403 / KEY ISSUES ---------------------------------
+  let fellBack = false;
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
-    const is403 = /(^|\s)403(\s|$)/.test(String(err.status || err.message || ""));
+
     const isMapTiler = /api\.maptiler\.com/.test(err.url);
-    if (isMapTiler && (is403 || !KEY)) {
-      console.warn("MapTiler request blocked or no key. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; and allow your domain in key settings.");
+    const is403 = (err.status === 403) || /(^|\s)403(\s|$)/.test(String(err.message || ""));
+    if (isMapTiler && is403 && !fellBack) {
+      fellBack = true;
+      console.warn("MapTiler blocked (403). Switching to fallback style without key.");
+      map.setStyle(fallbackStyle);
+      map.once("styledata", () => {
+        if (typeof map.setProjection === "function") {
+          try { map.setProjection({ name: "globe" }); } catch (_) {}
+        }
+      });
     }
   });
 
-  // --- 4) LOAD PHOTOS ONLY FROM travel/photos.json ---------------------------
+  // --- 6) LOAD PHOTOS ONLY FROM travel/photos.json ---------------------------
   const statusEl = document.getElementById("status");
 
   async function loadTravelPhotosJSON() {
@@ -197,8 +246,7 @@
     }
   }
 
-  // --- 5) EXIF HELPERS -------------------------------------------------------
-  // If ExifReader didn’t attach to window for any reason, fetch it again and wait.
+  // --- 7) EXIF HELPERS -------------------------------------------------------
   function ensureExif() {
     if (window.ExifReader) return Promise.resolve();
     return new Promise((resolve, reject) => {
