@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Vertical Perspective Globe — Blue Water + Contours</title>
+<title>Travel</title>
 <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
 <style>
   body, html {
@@ -22,10 +22,27 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+
 <!-- Optional: Put your MapTiler key in a global var -->
 <script>
-  window.MAPTILER_KEY = ""; // <-- your key here
+  window.MAPTILER_KEY = ""; // <-- your MapTiler key here
 </script>
+
+<!-- Projection hook: overwrite maplibregl.Map to run setProjection after init -->
+<script>
+(function(){
+  const OriginalMap = maplibregl.Map;
+  maplibregl.Map = function(opts) {
+    const m = new OriginalMap(opts);
+    m.on("load", () => {
+      m.setProjection({ name: "vertical-perspective" });
+    });
+    return m;
+  };
+  maplibregl.Map.prototype = OriginalMap.prototype;
+})();
+</script>
+
 <script src="js/blue-contours-map.js"></script>
 </body>
 </html>
