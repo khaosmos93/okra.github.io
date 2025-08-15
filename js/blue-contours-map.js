@@ -2,12 +2,6 @@
   const KEY = (window.MAPTILER_KEY || "").trim();
   const withKey = (url) => KEY ? url.replace("{key}", KEY) : url.replace("?key={key}", "");
 
-  // OpenMapTiles schema via MapTiler:
-  // - vector tiles: "v3" (water, waterway)
-  // - contour tiles: "contours" (source-layer = "contour")
-  // We build a minimal style that only draws:
-  //   background (black), water polygons (deep blue), waterway lines (blue),
-  //   and contour lines (white/gray). Everything else is omitted.
   const style = {
     version: 8,
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
@@ -22,22 +16,22 @@
       }
     },
     layers: [
-      // 0) pure black background
+      // Background — pure black
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
 
-      // 1) water polygons (oceans, large lakes)
+      // Water polygons — oceans & lakes
       {
         id: "water-fill",
         type: "fill",
         source: "omt",
         "source-layer": "water",
         paint: {
-          "fill-color": "#0a2a66",      // deep blue water
+          "fill-color": "#0a2a66",
           "fill-opacity": 1.0
         }
       },
 
-      // 2) rivers & smaller waterways (lines)
+      // Waterway lines — rivers
       {
         id: "waterway-line",
         type: "line",
@@ -56,8 +50,7 @@
         }
       },
 
-      // 3) contours from the contours tileset (meters). Two passes:
-      //    index contours (bold) + regular contours (thin)
+      // Index contours — bold white
       {
         id: "contours-index",
         type: "line",
@@ -77,6 +70,8 @@
           ]
         }
       },
+
+      // Regular contours — thinner gray
       {
         id: "contours-regular",
         type: "line",
@@ -87,7 +82,7 @@
           "line-color": "#cfd2d6",
           "line-opacity": [
             "interpolate", ["linear"], ["zoom"],
-            2, 0.25,   // faint at low zoom
+            2, 0.25,
             6, 0.5,
             10, 0.8,
             14, 0.9
@@ -105,13 +100,14 @@
     ]
   };
 
-  // Init
   const map = new maplibregl.Map({
     container: "map",
-    hash: true,                    // URL sync (nice for sharing)
+    hash: true,
     style,
-    center: [0, 20],               // start roughly Africa-centered
+    center: [0, 20],
     zoom: 1.8,
+    projection: { name: "vertical-perspective", center: [0, 20], fov: 3 },
+    renderWorldCopies: false,
     attributionControl: false
   });
 
@@ -119,7 +115,7 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-  // Optional: dark UI tweaks for controls
+  // Dark UI for controls
   map.on("load", () => {
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
