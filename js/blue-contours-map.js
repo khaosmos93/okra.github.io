@@ -1,16 +1,25 @@
 (() => {
-  const KEY = (window.MAPTILER_KEY || "").trim();
-  const withKey = (url) => KEY ? url.replace("{key}", KEY) : url.replace("?key={key}", "");
+  // --- KEY helper ------------------------------------------------------------
+  const urlKey = new URLSearchParams(location.search).get("key") || "";
+  const KEY = (window.MAPTILER_KEY || urlKey || "").trim();
+  const withKey = (url) => {
+    if (!KEY) return url.replace("?key={key}", "");
+    if (url.includes("{key}")) return url.replace("{key}", KEY);
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}key=${encodeURIComponent(KEY)}`;
+  };
 
-  // Minimal dark style: background, water, waterways, contours
+  // --- STYLE: altitude B/W + water + waterways + contours --------------------
   const style = {
     version: 8,
-
-    // ✅ set projection here (no map.setProjection needed)
-    projection: { name: "vertical-perspective" },
-
+    projection: { name: "vertical-perspective" }, // swap to "globe" if you like
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
+      terrainRGB: {
+        type: "raster-dem",
+        url: withKey("https://api.maptiler.com/tiles/terrain-rgb/tiles.json?key={key}"),
+        tileSize: 512
+      },
       omt: {
         type: "vector",
         url: withKey("https://api.maptiler.com/tiles/v3/tiles.json?key={key}")
@@ -21,22 +30,31 @@
       }
     },
     layers: [
-      // 0) pure black background
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
 
-      // 1) water polygons (oceans, large lakes)
+      // Relief (dark lowlands → bright ridges)
+      {
+        id: "hillshade",
+        type: "hillshade",
+        source: "terrainRGB",
+        paint: {
+          "hillshade-exaggeration": 0.9,
+          "hillshade-shadow-color": "#000000",
+          "hillshade-highlight-color": "#ffffff",
+          "hillshade-accent-color": "#9a9a9a"
+        }
+      },
+
+      // Water polygons
       {
         id: "water-fill",
         type: "fill",
         source: "omt",
         "source-layer": "water",
-        paint: {
-          "fill-color": "#0a2a66",
-          "fill-opacity": 1.0
-        }
+        paint: { "fill-color": "#0a2a66", "fill-opacity": 0.95 }
       },
 
-      // 2) rivers & smaller waterways
+      // Rivers
       {
         id: "waterway-line",
         type: "line",
@@ -44,18 +62,12 @@
         "source-layer": "waterway",
         paint: {
           "line-color": "#0f3d99",
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            2, 0.2,
-            6, 0.6,
-            10, 1.2,
-            14, 2.0
-          ],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.2, 6, 0.6, 10, 1.2, 14, 2.0],
           "line-opacity": 0.9
         }
       },
 
-      // 3) contours (index = bold, regular = thin)
+      // Contours
       {
         id: "contours-index",
         type: "line",
@@ -65,14 +77,7 @@
         paint: {
           "line-color": "#ffffff",
           "line-opacity": 0.9,
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            2, 0.2,
-            6, 0.5,
-            10, 0.9,
-            12, 1.2,
-            14, 1.6
-          ]
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.2, 6, 0.5, 10, 0.9, 12, 1.2, 14, 1.6]
         }
       },
       {
@@ -83,32 +88,20 @@
         filter: ["!=", ["get", "index"], 1],
         paint: {
           "line-color": "#cfd2d6",
-          "line-opacity": [
-            "interpolate", ["linear"], ["zoom"],
-            2, 0.25,
-            6, 0.5,
-            10, 0.8,
-            14, 0.9
-          ],
-          "line-width": [
-            "interpolate", ["linear"], ["zoom"],
-            2, 0.1,
-            6, 0.3,
-            10, 0.6,
-            12, 0.8,
-            14, 1.0
-          ]
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 2, 0.25, 6, 0.5, 10, 0.8, 14, 0.9],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 2, 0.1, 6, 0.3, 10, 0.6, 12, 0.8, 14, 1.0]
         }
       }
     ]
   };
 
+  // --- MAP init --------------------------------------------------------------
   const map = new maplibregl.Map({
     container: "map",
-    hash: true,
     style,
     center: [0, 20],
-    zoom: 1.8,
+    zoom: 1.6,
+    hash: true,
     attributionControl: false
   });
 
@@ -116,8 +109,8 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-  // Dark UI tweaks for controls
   map.on("load", () => {
+    // Dark UI polish
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
         background: rgba(15,15,20,0.6);
@@ -132,5 +125,121 @@
     const s = document.createElement("style");
     s.textContent = css;
     document.head.appendChild(s);
+
+    loadTravelPhotos();
+  });
+
+  // --- LIGHTBOX --------------------------------------------------------------
+  const lightbox = document.getElementById("lightbox");
+  const lightImg = document.getElementById("lightbox-img");
+  const lightCap = document.getElementById("lightbox-cap");
+  const lightClose = lightbox.querySelector(".close");
+
+  function openLightbox(src, caption = "") {
+    if (!lightbox) return;
+    lightImg.src = src;
+    lightImg.alt = caption || "";
+    lightCap.textContent = caption || "";
+    lightbox.classList.add("open");
+  }
+  function closeLightbox() {
+    if (!lightbox) return;
+    lightbox.classList.remove("open");
+    lightImg.src = "";
+    lightCap.textContent = "";
+  }
+
+  lightClose.addEventListener("click", closeLightbox);
+  lightbox.addEventListener("click", (e) => {
+    // click outside the image or on close button closes
+    if (e.target === lightbox || e.target === lightClose) closeLightbox();
+  });
+  addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && lightbox.classList.contains("open")) closeLightbox();
+  });
+
+  // --- PHOTOS: read from travel/photos.json; extract GPS from each image -----
+  const statusEl = document.getElementById("status");
+  function showStatus(msg, hideAfterMs = 2200) {
+    if (!statusEl) return;
+    statusEl.hidden = false;
+    statusEl.textContent = msg;
+    if (hideAfterMs) setTimeout(() => (statusEl.hidden = true), hideAfterMs);
+  }
+
+  async function loadTravelPhotos() {
+    try {
+      showStatus("Loading photos from travel/photos.json…", 0);
+      const res = await fetch("travel/photos.json", { cache: "no-store" });
+      if (!res.ok) {
+        showStatus("travel/photos.json not found.");
+        return;
+      }
+      const list = await res.json();
+      if (!Array.isArray(list) || list.length === 0) {
+        showStatus("travel/photos.json is empty.");
+        return;
+      }
+
+      let placed = 0;
+      for (const name of list) {
+        if (typeof name !== "string") continue;
+        const url = `travel/${encodeURIComponent(name)}`;
+        try {
+          const gps = await exifr.gps(url); // {latitude, longitude} if EXIF present
+          if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
+            addPhotoMarker(url, name, gps.longitude, gps.latitude);
+            placed++;
+          } else {
+            console.warn("No GPS EXIF for", name);
+          }
+        } catch (err) {
+          console.warn("EXIF parse failed for", name, err);
+        }
+      }
+
+      if (placed > 0) {
+        showStatus(`Placed ${placed} photo${placed > 1 ? "s" : ""}.`);
+      } else {
+        showStatus("No images had valid GPS EXIF.");
+      }
+    } catch (e) {
+      console.error(e);
+      showStatus("Error loading photos.json (see console).");
+    }
+  }
+
+  function addPhotoMarker(imgURL, label, lon, lat) {
+    const img = document.createElement("img");
+    img.className = "marker-img";
+    img.src = imgURL;
+    img.alt = label || "photo";
+
+    // open lightbox on click
+    img.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openLightbox(imgURL, label || "");
+    });
+
+    new maplibregl.Marker({ element: img, anchor: "bottom" })
+      .setLngLat([lon, lat])
+      .addTo(map);
+
+    // First photo: fly over
+    if (!addPhotoMarker._flown) {
+      addPhotoMarker._flown = true;
+      map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+    }
+  }
+
+  // Helpful warning if key is missing or blocked
+  map.on("error", (e) => {
+    const err = e && e.error;
+    if (!err || !err.url) return;
+    const is403 = /(^|\s)403(\s|$)/.test(String(err.status || err.message || ""));
+    const isMapTiler = /api\.maptiler\.com/.test(err.url);
+    if (isMapTiler && (is403 || !KEY)) {
+      console.warn("MapTiler request blocked or key missing. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; make sure your domain is allowed.");
+    }
   });
 })();
