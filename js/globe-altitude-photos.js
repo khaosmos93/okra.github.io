@@ -10,29 +10,19 @@
     return `${url}${sep}key=${encodeURIComponent(KEY)}`;
   };
 
-  // --- 2) STYLE: GLOBE + WATER + HILLSHADE + (optional) CONTOURS -------------
-  // Uses MapTiler:
-  // - Vector OMT v3 (water, waterway)         -> requires key
-  // - Raster hillshade (grayscale elevation)  -> requires key
-  // Optional: vector contours (commented IN by default)
+  // --- 2) STYLE: GLOBE + WATER + HILLSHADE + CONTOURS ------------------------
   const style = {
     version: 8,
-    projection: {
-      // name: "globe"
-      name: "lambertAzimuthalEqualArea"
-    },
+    projection: { name: "globe" }, // feel free to switch to "lambertAzimuthalEqualArea"
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       omt: {
         type: "vector",
         url: withKey("https://api.maptiler.com/tiles/v3/tiles.json?key={key}")
       },
-      // Pre-rendered grayscale hillshade tiles (WebP 512px)
       hillshade: {
         type: "raster",
-        tiles: [
-          withKey("https://api.maptiler.com/tiles/hillshade/{z}/{x}/{y}.webp?key={key}")
-        ],
+        tiles: [ withKey("https://api.maptiler.com/tiles/hillshade/{z}/{x}/{y}.webp?key={key}") ],
         tileSize: 512,
         attribution: "\u00A9 MapTiler \u00A9 OpenStreetMap contributors"
       },
@@ -42,23 +32,24 @@
       }
     },
     layers: [
-      // Background
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
 
-      // Hillshade underneath water (grayscale altitude)
+      // Grayscale relief: low = dark, high = bright (white)
       {
         id: "hillshade",
         type: "raster",
         source: "hillshade",
         paint: {
-          "raster-opacity": 0.95,
-          "raster-contrast": 0.1,
+          "raster-opacity": 1.0,
+          "raster-contrast": 0.5,
           "raster-brightness-min": 0.0,
-          "raster-brightness-max": 1.0
+          "raster-brightness-max": 1.0,
+          "raster-saturation": 0,
+          "raster-hue-rotate": 0
         }
       },
 
-      // Oceans & big lakes
+      // Oceans & large lakes (deep blue)
       {
         id: "water-fill",
         type: "fill",
@@ -70,7 +61,7 @@
         }
       },
 
-      // Rivers
+      // Rivers & waterways
       {
         id: "waterway-line",
         type: "line",
@@ -83,7 +74,7 @@
         }
       },
 
-      // Contours (optional but enabled here)
+      // Contours (index + regular)
       {
         id: "contours-index",
         type: "line",
@@ -125,8 +116,8 @@
   map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-left");
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-  // Darken UI buttons
   map.on("load", () => {
+    // Dark UI for controls
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
         background: rgba(15,15,20,0.6);
@@ -141,114 +132,150 @@
     const s = document.createElement("style");
     s.textContent = css;
     document.head.appendChild(s);
+
+    // Optional: auto-load hosted photos listed in /travel/photos.json
+    tryAutoLoadTravelPhotos();
   });
 
-  // Helpful message if key missing or blocked
+  // Friendly message if MapTiler key is missing or blocked
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
     const is403 = /(^|\s)403(\s|$)/.test(String(err.status || err.message || ""));
     const isMapTiler = /api\.maptiler\.com/.test(err.url);
     if (isMapTiler && (is403 || !KEY)) {
-      console.warn("MapTiler request blocked or no key. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; allow your domain in key settings.");
+      console.warn("MapTiler request blocked or no key. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; and allow your domain in key settings.");
     }
   });
 
   // --- 4) PHOTOS FROM EXIF GPS ----------------------------------------------
-  // Drag-and-drop and file input; for each image we extract GPS and place a marker.
   const inputEl = document.getElementById("photo-input");
   const dropHint = document.getElementById("drop-hint");
 
   function dmsToDeg(dms, ref) {
-    // dms: array of {numerator, denominator} or simple numbers (ExifReader already resolves)
     if (!Array.isArray(dms) || dms.length !== 3) return null;
     const toNum = (v) => (typeof v === "number" ? v : (v.numerator / v.denominator));
     const deg = toNum(dms[0]) + toNum(dms[1]) / 60 + toNum(dms[2]) / 3600;
     return (ref === "S" || ref === "W") ? -deg : deg;
-    }
+  }
 
-  async function readExifAndPlace(file) {
+  async function readExifAndPlaceFromFileObj(file) {
     try {
       const buffer = await file.arrayBuffer();
       const tags = ExifReader.load(buffer);
-      const lat = tags.GPSLatitude && tags.GPSLatitude.description
-        ? tags.GPSLatitude.description
-        : tags.GPSLatitude && tags.GPSLatitude.value;
-      const latRef = tags.GPSLatitudeRef && (tags.GPSLatitudeRef.value || tags.GPSLatitudeRef.description);
-      const lon = tags.GPSLongitude && tags.GPSLongitude.description
-        ? tags.GPSLongitude.description
-        : tags.GPSLongitude && tags.GPSLongitude.value;
-      const lonRef = tags.GPSLongitudeRef && (tags.GPSLongitudeRef.value || tags.GPSLongitudeRef.description);
+
+      const lat = tags.GPSLatitude?.description ?? tags.GPSLatitude?.value;
+      const latRef = tags.GPSLatitudeRef?.value ?? tags.GPSLatitudeRef?.description;
+      const lon = tags.GPSLongitude?.description ?? tags.GPSLongitude?.value;
+      const lonRef = tags.GPSLongitudeRef?.value ?? tags.GPSLongitudeRef?.description;
 
       let latDeg = null, lonDeg = null;
-
-      // ExifReader commonly gives numeric arrays already in degrees — handle both.
       if (typeof lat === "number" && typeof lon === "number") {
         latDeg = lat; lonDeg = lon;
       } else {
         latDeg = dmsToDeg(lat, typeof latRef === "string" ? latRef : (latRef && latRef.description));
         lonDeg = dmsToDeg(lon, typeof lonRef === "string" ? lonRef : (lonRef && lonRef.description));
       }
-
-      if (typeof latDeg !== "number" || typeof lonDeg !== "number" || isNaN(latDeg) || isNaN(lonDeg)) {
+      if (!isFinite(latDeg) || !isFinite(lonDeg)) {
         console.warn("No valid GPS in:", file.name);
         return;
       }
 
-      // Build a small preview URL (object URL)
       const imgURL = URL.createObjectURL(file);
-
-      // Marker element
-      const el = document.createElement("div");
-      el.className = "photo-marker";
-      const img = document.createElement("img");
-      img.src = imgURL;
-      img.alt = file.name;
-      el.appendChild(img);
-
-      // Popup
-      const popup = new maplibregl.Popup({ offset: 14 }).setHTML(
-        `<div style="display:flex;gap:8px;align-items:flex-start">
-          <img class="popup-img" src="${imgURL}" alt="${file.name}"/>
-          <div>
-            <div><strong>${file.name}</strong></div>
-            <div>Lat: ${latDeg.toFixed(5)} Lon: ${lonDeg.toFixed(5)}</div>
-          </div>
-        </div>`
-      );
-
-      new maplibregl.Marker({ element: el, anchor: "bottom" })
-        .setLngLat([lonDeg, latDeg])
-        .setPopup(popup)
-        .addTo(map);
-
-      // On first photo, fly to location a bit
-      if (!readExifAndPlace._hasFlown) {
-        readExifAndPlace._hasFlown = true;
-        map.flyTo({ center: [lonDeg, latDeg], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
-      }
+      addPhotoMarker(imgURL, file.name, lonDeg, latDeg);
     } catch (err) {
       console.error("EXIF read failed", err);
     }
   }
 
+  async function readExifAndPlaceFromURL(url, name) {
+    try {
+      const buffer = await fetch(url, { cache: "no-store" }).then(r => r.arrayBuffer());
+      const tags = ExifReader.load(buffer);
+
+      const lat = tags.GPSLatitude?.description ?? tags.GPSLatitude?.value;
+      const latRef = tags.GPSLatitudeRef?.value ?? tags.GPSLatitudeRef?.description;
+      const lon = tags.GPSLongitude?.description ?? tags.GPSLongitude?.value;
+      const lonRef = tags.GPSLongitudeRef?.value ?? tags.GPSLongitudeRef?.description;
+
+      const latDeg = (typeof lat === "number") ? lat : dmsToDeg(lat, typeof latRef === "string" ? latRef : (latRef && latRef.description));
+      const lonDeg = (typeof lon === "number") ? lon : dmsToDeg(lon, typeof lonRef === "string" ? lonRef : (lonRef && lonRef.description));
+
+      if (!isFinite(latDeg) || !isFinite(lonDeg)) {
+        console.warn("No valid GPS in:", name || url);
+        return;
+      }
+      addPhotoMarker(url, name || url.split("/").pop(), lonDeg, latDeg);
+    } catch (err) {
+      console.error("EXIF read failed for", url, err);
+    }
+  }
+
+  function addPhotoMarker(imgURL, label, lon, lat) {
+    const el = document.createElement("div");
+    el.className = "photo-marker";
+    const img = document.createElement("img");
+    img.src = imgURL; img.alt = label || "photo";
+    el.appendChild(img);
+
+    const popupHTML = `
+      <div style="display:flex;gap:8px;align-items:flex-start">
+        <img class="popup-img" src="${imgURL}" alt="${label || ""}" />
+        <div>
+          <div><strong>${label || ""}</strong></div>
+          <div>Lat: ${lat.toFixed(5)} Lon: ${lon.toFixed(5)}</div>
+        </div>
+      </div>
+    `;
+    const popup = new maplibregl.Popup({ offset: 14 }).setHTML(popupHTML);
+
+    new maplibregl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([lon, lat])
+      .setPopup(popup)
+      .addTo(map);
+
+    if (!addPhotoMarker._hasFlown) {
+      addPhotoMarker._hasFlown = true;
+      map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+    }
+  }
+
+  // File input
   inputEl.addEventListener("change", (e) => {
     const files = Array.from(e.target.files || []);
-    files.forEach(readExifAndPlace);
+    files.forEach(readExifAndPlaceFromFileObj);
   });
 
-  // Drag & drop support
+  // Drag & drop
   document.addEventListener("dragover", (e) => {
     e.preventDefault();
-    dropHint.classList.add("show");
+    document.getElementById("drop-hint").classList.add("show");
   });
   document.addEventListener("dragleave", (e) => {
-    if (e.target === document || e.target === document.body) dropHint.classList.remove("show");
+    if (e.target === document || e.target === document.body) {
+      document.getElementById("drop-hint").classList.remove("show");
+    }
   });
   document.addEventListener("drop", (e) => {
     e.preventDefault();
-    dropHint.classList.remove("show");
+    document.getElementById("drop-hint").classList.remove("show");
     const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith("image/"));
-    files.forEach(readExifAndPlace);
+    files.forEach(readExifAndPlaceFromFileObj);
   });
+
+  // Optional: auto-load hosted images listed in /travel/photos.json
+  async function tryAutoLoadTravelPhotos() {
+    try {
+      const res = await fetch("travel/photos.json", { cache: "no-store" });
+      if (!res.ok) return; // photos.json is optional
+      const list = await res.json();
+      if (!Array.isArray(list)) return;
+      for (const name of list) {
+        if (typeof name !== "string") continue;
+        await readExifAndPlaceFromURL(`travel/${encodeURIComponent(name)}`, name);
+      }
+    } catch (_) {
+      // ignore if not present
+    }
+  }
 })();
