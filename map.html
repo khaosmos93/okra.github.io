@@ -39,11 +39,14 @@
   <!-- MapLibre -->
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
-  <!-- EXIF reader (UMD builds expose window.ExifReader). Keep this BEFORE our JS. -->
+  <!-- Try to load ExifReader up-front -->
   <script src="https://unpkg.com/exifreader@4/dist/exif-reader.min.js"></script>
 
-  <!-- Your MapTiler key (or pass ?key=YOUR_KEY in the URL) -->
-  <script>window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM";</script>
+  <!-- Optional: set your MapTiler key here, or pass it as ?key=YOUR_KEY in the URL -->
+  <script>
+    // Replace with your key or use ?key=... in the URL
+    window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM";
+  </script>
 
   <script src="js/globe-altitude-photos.js"></script>
 </body>
