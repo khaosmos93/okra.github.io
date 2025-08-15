@@ -3,24 +3,67 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Travel</title>
+<title>Globe • Altitude • Photos</title>
 <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
-<link rel="shortcut icon" href="#" />
 <style>
-  html, body { margin:0; padding:0; height:100%; background:#000; }
-  #map { width:100%; height:100%; }
+  html, body { height: 100%; margin: 0; background: #000; }
+  #map { width: 100%; height: 100%; }
+
+  /* Simple drop overlay for photos */
+  .drop-hint {
+    position: fixed; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.45);
+    color: #fff; font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    z-index: 10; text-align: center;
+  }
+  .drop-hint.show { display: flex; }
+  .photo-uploader {
+    position: absolute; left: 12px; top: 12px; z-index: 5;
+    background: rgba(15,15,20,.7); border: 1px solid rgba(255,255,255,.1);
+    padding: 8px 10px; border-radius: 10px; color: #fff;
+    backdrop-filter: blur(6px);
+  }
+  .photo-uploader input { color: #ddd; }
+  .photo-marker {
+    width: 40px; height: 40px; border-radius: 8px; overflow: hidden;
+    border: 2px solid #fff; box-shadow: 0 2px 10px rgba(0,0,0,.6);
+    background: #000;
+  }
+  .photo-marker img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .maplibregl-popup-content {
+    background: rgba(10,10,14,.92);
+    color: #eee;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    padding: 8px;
+  }
+  .popup-img { max-width: 240px; max-height: 240px; display: block; }
 </style>
 </head>
 <body>
-  <div id="map"></div>
 
-  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<div id="map"></div>
 
-  <!-- Optional: put your MapTiler key here -->
-  <script>
-    window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM"; /* your key (or leave blank if not using MapTiler-hosted tiles) */
-  </script>
+<!-- Drag/drop & input for photos -->
+<div class="photo-uploader">
+  <label>
+    <strong>Photos:</strong>
+    <input id="photo-input" type="file" accept="image/*" multiple />
+  </label>
+</div>
+<div id="drop-hint" class="drop-hint">Drop images anywhere to pin by EXIF GPS</div>
 
-  <script src="js/blue-contours-map.js"></script>
+<script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+<!-- EXIF parser -->
+<script src="https://unpkg.com/exifreader@4.23.6/dist/exif-reader.min.js"></script>
+
+<script>
+  // Put your MapTiler key here OR pass via URL like:  .../map.html?key=YOUR_KEY
+  window.MAPTILER_KEY = "n6FyDnaUot032Ugli9xM";
+  window.MAPTILER_KEY = window.MAPTILER_KEY || "";
+</script>
+
+<script src="js/globe-altitude-photos.js"></script>
 </body>
 </html>
