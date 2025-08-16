@@ -92,7 +92,7 @@
     container: "map",
     style,
     center: [100, 30],   // ← Asia-centered (lon, lat)
-    zoom: 1.6,
+    zoom: 3.5,
     hash: true,
     attributionControl: false
   });
