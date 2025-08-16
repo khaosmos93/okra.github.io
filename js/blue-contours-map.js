@@ -91,7 +91,7 @@
   const map = new maplibregl.Map({
     container: "map",
     style,
-    center: [0, 20],
+    center: [100, 30],   // ← Asia-centered (lon, lat)
     zoom: 1.6,
     hash: true,
     attributionControl: false
@@ -253,7 +253,7 @@
   // Random lon/lat — force Antarctica (lat ∈ [-90, -60))
   function randomLngLat() {
     const lon = Math.random() * 360 - 180;
-    const lat = -60 - Math.random() * 30;
+    const lat = -70 - Math.random() * 20;
     return { lon, lat };
   }
 
@@ -312,10 +312,10 @@
       .setLngLat([photo.lon, photo.lat])
       .addTo(map);
 
-    if (!addPhotoMarker._flown) {
-      addPhotoMarker._flown = true;
-      map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
-    }
+    // if (!addPhotoMarker._flown) {
+    //   addPhotoMarker._flown = true;
+    //   map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+    // }
   }
 
   map.on("error", (e) => {
