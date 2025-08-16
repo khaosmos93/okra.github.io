@@ -12,7 +12,7 @@ if [ ! -d "$DIR" ]; then
   exit 1
 fi
 
-# Collect relative image paths (jpg/jpeg/png), including subfolders
+# Collect relative image paths (jpg/jpeg/png), including subfolders (sorted)
 RELFILES=()
 while IFS= read -r -d '' f; do
   rel="${f#$DIR/}"       # strip "travel/" prefix
@@ -26,7 +26,9 @@ if [ ${#RELFILES[@]} -eq 0 ]; then
   exit 0
 fi
 
-# Try EXIF path
+# If we have exiftool + jq, build a GPS map and emit mixed array:
+#   - {src,lat,lon} for files with GPS
+#   - "filename" for files without GPS
 if have_cmd exiftool && have_cmd jq; then
   echo "🔎 Using exiftool + jq to extract GPS…"
   TMP_JSON="$(mktemp)"
@@ -34,36 +36,41 @@ if have_cmd exiftool && have_cmd jq; then
     -ext jpg -ext JPG -ext jpeg -ext JPEG -ext png -ext PNG \
     "$DIR" > "$TMP_JSON" || true
 
-  jq --arg dir_prefix "$DIR/" '
-    [ .[]
-      | select(.GPSLatitude != null and .GPSLongitude != null)
-      | {
-          src: (.SourceFile | sub("^" + ($dir_prefix|gsub("/";"\\/")); "")),
-          lat: .GPSLatitude,
-          lon: .GPSLongitude
-        }
-    ]
-  ' "$TMP_JSON" > "$OUT" || true
-  rm -f "$TMP_JSON"
+  # Build a JSON array of filenames from RELFILES
+  FILES_JSON=$(printf '%s\n' "${RELFILES[@]}" | jq -R -s 'split("\n") | map(select(length>0))')
 
+  # Create a map of { "relative/path.jpg": {lat:..., lon:...}, ... }
+  GPSMAP_JSON=$(jq --arg dir_prefix "$DIR/" '
+    ( map(select(.GPSLatitude != null and .GPSLongitude != null)
+          | { ( .SourceFile | sub("^" + ($dir_prefix|gsub("/";"\\/")); "") )
+              : { lat: .GPSLatitude, lon: .GPSLongitude } })
+    | add ) // {}
+  ' "$TMP_JSON")
+
+  # Merge: for each filename, output object if GPS exists, else the filename string
+  jq -n --argjson files "$FILES_JSON" --argjson gps "$GPSMAP_JSON" '
+    $files
+    | map( if ($gps[.] and ($gps[.].lat != null) and ($gps[.].lon != null))
+            then { src: ., lat: $gps[.].lat, lon: $gps[.].lon }
+            else .
+          end )
+  ' > "$OUT"
+
+  rm -f "$TMP_JSON"
   COUNT=$(jq 'length' "$OUT" 2>/dev/null || echo 0)
-  if [ "$COUNT" -gt 0 ]; then
-    echo "✅ Wrote $OUT with $COUNT geotagged photos."
-    exit 0
-  else
-    echo "⚠️  No images with GPS EXIF found. Falling back to filenames."
-  fi
-else
-  if ! have_cmd exiftool; then
-    echo "⚠️  'exiftool' not found (brew install exiftool)."
-  fi
-  if ! have_cmd jq; then
-    echo "⚠️  'jq' not found (brew install jq)."
-  fi
-  echo "   Falling back to filename-only JSON."
+  echo "✅ Wrote $OUT with $COUNT entries (objects for geotagged, strings for others)."
+  exit 0
 fi
 
-# Fallback: filenames only
+# Fallback: no exiftool and/or no jq → filenames only
+if ! have_cmd exiftool; then
+  echo "⚠️  'exiftool' not found (brew install exiftool)."
+fi
+if ! have_cmd jq; then
+  echo "⚠️  'jq' not found (brew install jq)."
+fi
+echo "   Falling back to filename-only JSON."
+
 {
   echo "["
   for i in "${!RELFILES[@]}"; do
