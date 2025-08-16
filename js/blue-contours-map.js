@@ -253,7 +253,7 @@
   // Random lon/lat — force Antarctica (lat ∈ [-90, -60))
   function randomLngLat() {
     const lon = Math.random() * 360 - 180;
-    const lat = -70 - Math.random() * 20;
+    const lat = -70 - Math.random() * 15;
     return { lon, lat };
   }
 
