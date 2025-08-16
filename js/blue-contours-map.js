@@ -129,66 +129,89 @@
     loadTravelPhotos();
   });
 
-  // --- LIGHTBOX --------------------------------------------------------------
+  // --- LIGHTBOX with slider --------------------------------------------------
   const lightbox = document.getElementById("lightbox");
   const lightImg = document.getElementById("lightbox-img");
   const lightCap = document.getElementById("lightbox-cap");
-  const lightClose = lightbox.querySelector(".close");
+  const btnPrev  = document.getElementById("btn-prev");
+  const btnNext  = document.getElementById("btn-next");
+  const btnClose = lightbox.querySelector(".close");
 
-  function openLightbox(src, caption = "") {
-    if (!lightbox) return;
-    lightImg.src = src;
-    lightImg.alt = caption || "";
-    lightCap.textContent = caption || "";
+  /** photo list kept in same order as photos.json */
+  const photos = []; // {url,label,lon,lat}
+
+  let currentIndex = -1;
+
+  function openLightboxAt(i) {
+    if (i < 0 || i >= photos.length) return;
+    currentIndex = i;
+    const p = photos[i];
+    lightImg.src = p.url;
+    lightImg.alt = p.label || "";
+    lightCap.textContent = p.label || "";
     lightbox.classList.add("open");
+
+    // preload neighbors for snappy nav
+    preload(i + 1);
+    preload(i - 1);
+  }
+  function preload(i) {
+    if (i < 0 || i >= photos.length) return;
+    const img = new Image();
+    img.src = photos[i].url;
   }
   function closeLightbox() {
-    if (!lightbox) return;
     lightbox.classList.remove("open");
     lightImg.src = "";
     lightCap.textContent = "";
+    currentIndex = -1;
   }
+  function showNext() { if (photos.length) openLightboxAt((currentIndex + 1) % photos.length); }
+  function showPrev() { if (photos.length) openLightboxAt((currentIndex - 1 + photos.length) % photos.length); }
 
-  lightClose.addEventListener("click", closeLightbox);
+  btnClose.addEventListener("click", closeLightbox);
+  btnNext.addEventListener("click", showNext);
+  btnPrev.addEventListener("click", showPrev);
+
   lightbox.addEventListener("click", (e) => {
-    // click outside the image or on close button closes
-    if (e.target === lightbox || e.target === lightClose) closeLightbox();
-  });
-  addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && lightbox.classList.contains("open")) closeLightbox();
+    // click backdrop closes; clicks on image/buttons do not
+    if (e.target === lightbox) closeLightbox();
   });
 
-  // --- PHOTOS: read from travel/photos.json; extract GPS from each image -----
+  // keyboard: Esc, ←, →
+  addEventListener("keydown", (e) => {
+    if (!lightbox.classList.contains("open")) return;
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "ArrowRight") showNext();
+    else if (e.key === "ArrowLeft") showPrev();
+  });
+
+  // --- PHOTOS: read from travel/photos.json; EXIF GPS from each --------------
   const statusEl = document.getElementById("status");
-  function showStatus(msg, hideAfterMs = 2200) {
-    if (!statusEl) return;
-    statusEl.hidden = false;
-    statusEl.textContent = msg;
-    if (hideAfterMs) setTimeout(() => (statusEl.hidden = true), hideAfterMs);
-  }
+  const showStatus = (msg, hide = 2200) => {
+    statusEl.hidden = false; statusEl.textContent = msg;
+    if (hide) setTimeout(() => (statusEl.hidden = true), hide);
+  };
 
   async function loadTravelPhotos() {
     try {
       showStatus("Loading photos from travel/photos.json…", 0);
       const res = await fetch("travel/photos.json", { cache: "no-store" });
-      if (!res.ok) {
-        showStatus("travel/photos.json not found.");
-        return;
-      }
+      if (!res.ok) return showStatus("travel/photos.json not found.");
+
       const list = await res.json();
-      if (!Array.isArray(list) || list.length === 0) {
-        showStatus("travel/photos.json is empty.");
-        return;
-      }
+      if (!Array.isArray(list) || list.length === 0) return showStatus("travel/photos.json is empty.");
 
       let placed = 0;
       for (const name of list) {
         if (typeof name !== "string") continue;
         const url = `travel/${encodeURIComponent(name)}`;
         try {
-          const gps = await exifr.gps(url); // {latitude, longitude} if EXIF present
+          const gps = await exifr.gps(url); // {latitude, longitude}
           if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
-            addPhotoMarker(url, name, gps.longitude, gps.latitude);
+            const p = { url, label: name, lon: gps.longitude, lat: gps.latitude };
+            photos.push(p);
+            addPhotoMarker(p, photos.length - 1);
             placed++;
           } else {
             console.warn("No GPS EXIF for", name);
@@ -209,37 +232,35 @@
     }
   }
 
-  function addPhotoMarker(imgURL, label, lon, lat) {
+  function addPhotoMarker(photo, index) {
     const img = document.createElement("img");
     img.className = "marker-img";
-    img.src = imgURL;
-    img.alt = label || "photo";
-
-    // open lightbox on click
+    img.src = photo.url;
+    img.alt = photo.label || "photo";
     img.addEventListener("click", (e) => {
       e.stopPropagation();
-      openLightbox(imgURL, label || "");
+      openLightboxAt(index);
     });
 
     new maplibregl.Marker({ element: img, anchor: "bottom" })
-      .setLngLat([lon, lat])
+      .setLngLat([photo.lon, photo.lat])
       .addTo(map);
 
-    // First photo: fly over
+    // First placed: fly to it
     if (!addPhotoMarker._flown) {
       addPhotoMarker._flown = true;
-      map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+      map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
     }
   }
 
-  // Helpful warning if key is missing or blocked
+  // Helpful key warning
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
     const is403 = /(^|\s)403(\s|$)/.test(String(err.status || err.message || ""));
     const isMapTiler = /api\.maptiler\.com/.test(err.url);
     if (isMapTiler && (is403 || !KEY)) {
-      console.warn("MapTiler request blocked or key missing. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; make sure your domain is allowed.");
+      console.warn("MapTiler request blocked or key missing. Add ?key=YOUR_KEY or set window.MAPTILER_KEY; ensure your domain is allowed.");
     }
   });
 })();
