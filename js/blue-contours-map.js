@@ -274,11 +274,27 @@
         addPhotoMarker(p, index);
         return true;
       }
-      console.warn("No GPS EXIF for", name);
+      console.warn("No GPS EXIF for", name, "→ placing randomly");
+      const { lon, lat } = randomLngLat();
+      const p = { url, label: name, lon, lat };
+      const index = photos.push(p) - 1;
+      addPhotoMarker(p, index);
+      return true;
     } catch (err) {
-      console.warn("EXIF parse failed for", name, err);
+      console.warn("EXIF parse failed for", name, err, "→ placing randomly");
+      const { lon, lat } = randomLngLat();
+      const p = { url, label: name, lon, lat };
+      const index = photos.push(p) - 1;
+      addPhotoMarker(p, index);
+      return true;
     }
-    return false;
+  }
+
+  // Random lon/lat (avoid extreme poles)
+  function randomLngLat() {
+    const lon = Math.random() * 360 - 180; // [-180, 180)
+    const lat = Math.random() * 120 - 60;  // [-60, 60)
+    return { lon, lat };
   }
 
   function addPhotoMarker(photo, index) {
