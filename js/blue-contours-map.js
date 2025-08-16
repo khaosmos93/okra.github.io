@@ -12,10 +12,9 @@
   // --- STYLE: altitude B/W + water + waterways + contours --------------------
   const style = {
     version: 8,
-    projection: { name: "vertical-perspective" }, // swap to "globe" if you like
+    projection: { name: "vertical-perspective" },
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
-      // DEM for hillshade (grayscale relief; dark lowlands → bright highlights)
       terrainRGB: {
         type: "raster-dem",
         url: withKey("https://api.maptiler.com/tiles/terrain-rgb/tiles.json?key={key}"),
@@ -32,8 +31,6 @@
     },
     layers: [
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
-
-      // Relief (dark → light; note hillshade shows slope/illumination not absolute height)
       {
         id: "hillshade",
         type: "hillshade",
@@ -45,8 +42,6 @@
           "hillshade-accent-color": "#9a9a9a"
         }
       },
-
-      // Water polygons
       {
         id: "water-fill",
         type: "fill",
@@ -54,8 +49,6 @@
         "source-layer": "water",
         paint: { "fill-color": "#0a2a66", "fill-opacity": 0.95 }
       },
-
-      // Rivers
       {
         id: "waterway-line",
         type: "line",
@@ -67,8 +60,6 @@
           "line-opacity": 0.9
         }
       },
-
-      // Contours
       {
         id: "contours-index",
         type: "line",
@@ -111,7 +102,6 @@
   map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
   map.on("load", () => {
-    // Dark UI polish
     const css = `
       .maplibregl-ctrl, .maplibregl-ctrl-group {
         background: rgba(15,15,20,0.6);
@@ -138,9 +128,7 @@
   const btnNext  = document.getElementById("btn-next");
   const btnClose = lightbox ? lightbox.querySelector(".close") : null;
 
-  /** photo list kept in same order as photos.json */
   const photos = []; // {url,label,lon,lat}
-
   let currentIndex = -1;
 
   function openLightboxAt(i) {
@@ -149,13 +137,10 @@
     currentIndex = i;
     const p = photos[i];
     lightImg.src = p.url;
-    lightImg.alt = p.label || "";
-    lightCap.textContent = p.label || "";
+    lightImg.alt = "";               // ← no filename/label in alt
+    lightCap.textContent = "";       // ← hide caption/filename
     lightbox.classList.add("open");
-
-    // preload neighbors for snappy nav
-    preload(i + 1);
-    preload(i - 1);
+    preload(i + 1); preload(i - 1);
   }
   function preload(i) {
     if (i < 0 || i >= photos.length) return;
@@ -175,15 +160,9 @@
   if (btnClose) btnClose.addEventListener("click", closeLightbox);
   if (btnNext)  btnNext.addEventListener("click", showNext);
   if (btnPrev)  btnPrev.addEventListener("click", showPrev);
-
   if (lightbox) {
-    lightbox.addEventListener("click", (e) => {
-      // click backdrop closes; clicks on image/buttons do not
-      if (e.target === lightbox) closeLightbox();
-    });
+    lightbox.addEventListener("click", (e) => { if (e.target === lightbox) closeLightbox(); });
   }
-
-  // keyboard: Esc, ←, →
   addEventListener("keydown", (e) => {
     if (!lightbox || !lightbox.classList.contains("open")) return;
     if (e.key === "Escape") closeLightbox();
@@ -191,7 +170,7 @@
     else if (e.key === "ArrowLeft") showPrev();
   });
 
-  // --- PHOTOS: read from travel/photos.json; auto-handle strings or objects ---
+  // --- PHOTOS ---------------------------------------------------------------
   const statusEl = document.getElementById("status");
   const showStatus = (msg, hide = 2200) => {
     if (!statusEl) return;
@@ -200,12 +179,9 @@
   };
 
   const exifrAvailable = !!(window.exifr && typeof exifr.gps === "function");
-
   const normalizeURL = (src) => {
     if (!src) return null;
-    // If absolute or root-relative, leave as is
     if (/^https?:\/\//i.test(src) || src.startsWith("/")) return src;
-    // Ensure single "travel/" prefix
     if (!src.startsWith("travel/")) return `travel/${src}`;
     return src;
   };
@@ -221,7 +197,6 @@
 
       let placed = 0;
       for (const item of list) {
-        // Case A: object with pre-extracted coords { src, lat, lon }
         if (item && typeof item === "object" && !Array.isArray(item)) {
           const url = normalizeURL(item.src);
           const lat = Number(item.lat);
@@ -233,26 +208,14 @@
             placed++;
             continue;
           }
-          // If malformed, fall through to try EXIF if "src" looks like a filename
-          if (typeof item.src === "string" && exifrAvailable) {
-            await tryPlaceViaExif(item.src);
-          }
+          if (typeof item.src === "string" && exifrAvailable) await tryPlaceViaExif(item.src);
           continue;
         }
-
-        // Case B: plain string filename -> use EXIF if available
-        if (typeof item === "string") {
-          await tryPlaceViaExif(item);
-        }
+        if (typeof item === "string") await tryPlaceViaExif(item);
       }
 
-      if (placed > 0) {
-        showStatus(`Placed ${placed} photo${placed > 1 ? "s" : ""}.`);
-      } else {
-        showStatus(exifrAvailable
-          ? "No images had valid GPS EXIF."
-          : "No GPS in JSON and EXIF library not loaded.");
-      }
+      if (placed > 0) showStatus(`Placed ${placed} photo${placed > 1 ? "s" : ""}.`);
+      else showStatus(exifrAvailable ? "No images had valid GPS EXIF." : "No GPS in JSON and EXIF library not loaded.");
     } catch (e) {
       console.error(e);
       showStatus("Error loading photos.json (see console).");
@@ -262,12 +225,9 @@
   async function tryPlaceViaExif(name) {
     const url = normalizeURL(name);
     if (!url) return;
-    if (!exifrAvailable) {
-      console.warn("EXIF not available; skipping", name);
-      return;
-    }
+    if (!exifrAvailable) { console.warn("EXIF not available; skipping", name); return; }
     try {
-      const gps = await exifr.gps(url); // {latitude, longitude}
+      const gps = await exifr.gps(url);
       if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
         const p = { url, label: name, lon: gps.longitude, lat: gps.latitude };
         const index = photos.push(p) - 1;
@@ -292,16 +252,57 @@
 
   // Random lon/lat — force Antarctica (lat ∈ [-90, -60))
   function randomLngLat() {
-    const lon = Math.random() * 360 - 180;    // [-180, 180)
-    const lat = -60 - Math.random() * 30;     // [-90, -60)
+    const lon = Math.random() * 360 - 180;
+    const lat = -60 - Math.random() * 30;
     return { lon, lat };
   }
 
-  function addPhotoMarker(photo, index) {
+  // --- NEW: tiny thumbnail generator for markers (minimal change) -----------
+  async function createThumb(src, size = 40, type = 'image/webp', quality = 0.7) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
+      img.onload = () => {
+        try {
+          const s = size;
+          const canvas = document.createElement('canvas');
+          canvas.width = s; canvas.height = s;
+          const ctx = canvas.getContext('2d', { alpha: false });
+
+          // cover-crop to square
+          const iw = img.naturalWidth || img.width;
+          const ih = img.naturalHeight || img.height;
+          const r = iw / ih;
+          let sx = 0, sy = 0, sw = iw, sh = ih;
+          if (r > 1) { // wider
+            sw = ih * r; sx = (iw - sw) * 0.5;
+          } else {     // taller
+            sh = iw / r; sy = (ih - sh) * 0.5;
+          }
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, s, s);
+          resolve(canvas.toDataURL(type, quality));
+        } catch (e) { reject(e); }
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  async function addPhotoMarker(photo, index) {
     const img = document.createElement("img");
     img.className = "marker-img";
-    img.src = photo.url;
-    img.alt = photo.label || "photo";
+    img.alt = "photo";
+    img.loading = "lazy";
+    img.decoding = "async";
+
+    // ↓↓↓ use small thumbnail instead of full photo (memory saver)
+    try {
+      img.src = await createThumb(photo.url, 40);  // 40px thumb
+    } catch {
+      img.src = photo.url; // fallback if canvas fails
+    }
+
     img.addEventListener("click", (e) => {
       e.stopPropagation();
       openLightboxAt(index);
@@ -311,14 +312,12 @@
       .setLngLat([photo.lon, photo.lat])
       .addTo(map);
 
-    // First placed: fly to it
     if (!addPhotoMarker._flown) {
       addPhotoMarker._flown = true;
       map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
     }
   }
 
-  // Helpful key warning
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
