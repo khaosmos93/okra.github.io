@@ -91,8 +91,8 @@
   const map = new maplibregl.Map({
     container: "map",
     style,
-    center: [100, 30],   // ← Asia-centered (lon, lat)
-    zoom: 3.5,
+    center: [100, 30],   // Asia-centered (lon, lat)
+    zoom: 5.5,           // ≈1000km box width
     hash: true,
     attributionControl: false
   });
