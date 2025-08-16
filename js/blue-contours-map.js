@@ -290,10 +290,10 @@
     }
   }
 
-  // Random lon/lat (avoid extreme poles)
+  // Random lon/lat — force Antarctica (lat ∈ [-90, -60))
   function randomLngLat() {
-    const lon = Math.random() * 360 - 180; // [-180, 180)
-    const lat = Math.random() * 120 - 60;  // [-60, 60)
+    const lon = Math.random() * 360 - 180;    // [-180, 180)
+    const lat = -60 - Math.random() * 30;     // [-90, -60)
     return { lon, lat };
   }
 
