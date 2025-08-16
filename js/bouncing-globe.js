@@ -1,155 +1,201 @@
+// js/bouncing-globe.js
 (() => {
-  const MAP_URL = "map.html"; // change if you want a full URL
+  // ---- Config ----
+  const DEST_URL = 'map.html';      // where a click on the globe goes
+  const SIZE_MIN = 78;              // px (scales up on bigger viewports)
+  const SIZE_MAX = 132;             // px
+  const SPEED_MIN = 70;             // px/s
+  const SPEED_MAX = 140;            // px/s
+  const Z_INDEX   = 25;             // above your poem layer (15) and titles (10)
+  const MARGIN    = 8;              // keep a small gutter from edges
 
-  // create a full-viewport transparent canvas overlay
-  const cvs = document.createElement("canvas");
-  cvs.id = "bouncing-globe";
-  Object.assign(cvs.style, {
-    position: "fixed",
-    inset: "0",
-    width: "100vw",
-    height: "100vh",
-    pointerEvents: "auto",
-    background: "transparent",
-    zIndex: 50 // put it above your background but below any menus if needed
+  // Respect reduced motion
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---- Create the globe element ----
+  const globe = document.createElement('a');
+  globe.href = DEST_URL;
+  globe.setAttribute('aria-label', 'Open map');
+  globe.id = 'glass-globe';
+  Object.assign(globe.style, {
+    position: 'fixed',
+    left: '0px',
+    top:  '0px',
+    width: '100px',
+    height:'100px',
+    borderRadius: '50%',
+    zIndex: String(Z_INDEX),
+    // Glass look that refracts/warps the content behind it (browser support dependent)
+    backdropFilter: 'blur(8px) saturate(1.15) contrast(1.08) brightness(1.05)',
+    WebkitBackdropFilter: 'blur(8px) saturate(1.15) contrast(1.08) brightness(1.05)',
+    background:
+      'radial-gradient(120% 120% at 30% 30%, rgba(255,255,255,.35), rgba(255,255,255,.06) 50%, rgba(255,255,255,0) 60%)',
+    boxShadow:
+      // outer glow + soft cast shadow + inner rim
+      '0 6px 18px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.35), inset 0 18px 28px rgba(255,255,255,.06)',
+    cursor: 'pointer',
+    userSelect: 'none',
+    // keep the element strictly circular and only this circle clickable
+    overflow: 'hidden',
+    // prevent accidental text selection or drag
+    touchAction: 'manipulation',
+    // Optional: subtle sheen
+    backgroundClip: 'padding-box',
   });
-  document.body.appendChild(cvs);
-  const ctx = cvs.getContext("2d");
 
-  // retina sizing
-  function resize() {
-    const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
-    const wcss = window.innerWidth;
-    const hcss = window.innerHeight;
-    cvs.width = Math.floor(wcss * dpr);
-    cvs.height = Math.floor(hcss * dpr);
-    cvs._wcss = wcss; // store css px for hit tests
-    cvs._hcss = hcss;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // draw in CSS pixels
+  // Little specular highlight element (for depth)
+  const glare = document.createElement('div');
+  Object.assign(glare.style, {
+    position: 'absolute',
+    left: '12%',
+    top: '10%',
+    width: '40%',
+    height:'40%',
+    borderRadius: '50%',
+    background: 'radial-gradient(closest-side, rgba(255,255,255,.45), rgba(255,255,255,0))',
+    pointerEvents: 'none',
+    filter: 'blur(0.5px)',
+  });
+  globe.appendChild(glare);
+
+  // Small “shadow” underneath (helps the ball float visually)
+  const shadow = document.createElement('div');
+  Object.assign(shadow.style, {
+    position: 'absolute',
+    left: '15%',
+    bottom: '-10%',
+    width: '70%',
+    height: '18%',
+    background: 'radial-gradient(50% 50% at 50% 50%, rgba(0,0,0,.35), rgba(0,0,0,0))',
+    filter: 'blur(4px)',
+    pointerEvents: 'none',
+  });
+  globe.appendChild(shadow);
+
+  document.body.appendChild(globe);
+
+  // ---- Size based on viewport ----
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  function computeSize() {
+    const s = Math.round(clamp(Math.min(window.innerWidth, window.innerHeight) * 0.12, SIZE_MIN, SIZE_MAX));
+    globe.style.width  = s + 'px';
+    globe.style.height = s + 'px';
+    return s;
   }
-  resize();
-  addEventListener("resize", resize, { passive: true });
+  let size = computeSize();
 
-  // globe state
-  let r = Math.max(72, Math.min(160, Math.floor(Math.min(cvs._wcss, cvs._hcss) * 0.12)));
-  let x = r + 24;
-  let y = r + 24;
-  let vx = 0.9; // px per frame
-  let vy = 0.7;
-  let rot = 0;  // radians
+  // ---- Initial position & velocity ----
+  // Start somewhere not covering the middle much (to not fight with poem center)
+  let x = window.innerWidth  * 0.72;
+  let y = window.innerHeight * 0.18;
 
-  // update radius if screen changes a lot
-  function updateRadius() {
-    const target = Math.max(72, Math.min(160, Math.floor(Math.min(cvs._wcss, cvs._hcss) * 0.12)));
-    r += (target - r) * 0.1;
-  }
+  // Random direction & speed
+  function rand(min, max){ return min + Math.random()*(max-min); }
+  const speed = reduceMotion ? 0 : rand(SPEED_MIN, SPEED_MAX); // px/s
+  let angle = rand(0, Math.PI*2);
+  let vx = speed * Math.cos(angle);
+  let vy = speed * Math.sin(angle);
 
-  // draw a simple white wireframe globe: outer circle, a few parallels + meridians
-  function drawGlobe(cx, cy, radius, rotation) {
-    ctx.save();
-
-    // shadow for a tiny depth hint (optional)
-    ctx.beginPath();
-    ctx.arc(cx + radius * 0.06, cy + radius * 0.06, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(0,0,0,0.25)";
-    ctx.lineWidth = 3;
-    ctx.stroke();
-
-    // outer circle
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.strokeStyle = "#fff";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // parallels (latitudes)
-    ctx.save();
-    ctx.translate(cx, cy);
-    const latDeg = [-60, -30, 0, 30, 60];
-    ctx.strokeStyle = "rgba(255,255,255,0.7)";
-    ctx.lineWidth = 1;
-    for (const lat of latDeg) {
-      const y = radius * Math.sin((lat * Math.PI) / 180);
-      const rx = radius * Math.cos((lat * Math.PI) / 180);
-      ctx.save();
-      ctx.translate(0, y);
-      ctx.scale(rx / radius, 1);
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.restore();
-
-    // meridians (longitudes) — rotate to simulate spin
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(rotation);
-    const lonDeg = [-60, -30, 0, 30, 60, 90, -90];
-    ctx.strokeStyle = "rgba(255,255,255,0.55)";
-    ctx.lineWidth = 1;
-    for (const lon of lonDeg) {
-      // draw an ellipse that approximates a meridian
-      const sy = Math.cos((lon * Math.PI) / 180);
-      ctx.save();
-      ctx.scale(1, sy);
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.restore();
-
-    ctx.restore();
-  }
-
-  // animation loop
+  // ---- Animation loop ----
   let last = performance.now();
   function tick(now) {
-    const dt = Math.min(32, now - last);
+    const dt = (now - last) / 1000;
     last = now;
 
-    // clear
-    ctx.clearRect(0, 0, cvs._wcss, cvs._hcss);
+    // bounds
+    const w = window.innerWidth;
+    const h = window.innerHeight;
 
-    // update motion
-    updateRadius();
-    x += vx * (dt / 16);
-    y += vy * (dt / 16);
-    rot += 0.005 * (dt / 16);
+    // move
+    x += vx * dt;
+    y += vy * dt;
 
-    // bounce off edges
-    if (x - r < 0) { x = r; vx = Math.abs(vx); }
-    if (x + r > cvs._wcss) { x = cvs._wcss - r; vx = -Math.abs(vx); }
-    if (y - r < 0) { y = r; vy = Math.abs(vy); }
-    if (y + r > cvs._hcss) { y = cvs._hcss - r; vy = -Math.abs(vy); }
+    // Collide with walls (simple elastic bounce)
+    if (x < MARGIN) { x = MARGIN; vx = Math.abs(vx); }
+    if (y < MARGIN) { y = MARGIN; vy = Math.abs(vy); }
+    if (x + size > w - MARGIN) { x = w - MARGIN - size; vx = -Math.abs(vx); }
+    if (y + size > h - MARGIN) { y = h - MARGIN - size; vy = -Math.abs(vy); }
 
-    // draw
-    drawGlobe(x, y, r, rot);
+    globe.style.transform = `translate(${x}px, ${y}px)`;
 
-    requestAnimationFrame(tick);
+    raf = requestAnimationFrame(tick);
   }
-  requestAnimationFrame(tick);
+  let raf = requestAnimationFrame(tick);
 
-  // click → if inside globe, go to map
-  cvs.addEventListener("click", (e) => {
-    const rect = cvs.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const dx = mx - x;
-    const dy = my - y;
-    if (dx * dx + dy * dy <= r * r) {
-      window.location.href = MAP_URL;
+  // ---- Resize handling (visualViewport aware) ----
+  const onResize = () => {
+    size = computeSize();
+    // Nudge inside bounds if needed
+    x = Math.min(Math.max(x, MARGIN), Math.max(0, window.innerWidth  - size - MARGIN));
+    y = Math.min(Math.max(y, MARGIN), Math.max(0, window.innerHeight - size - MARGIN));
+  };
+  addEventListener('resize', onResize);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+
+  // ---- Interactions ----
+  // Pause bounce while pointer is down (makes clicking easier)
+  let paused = false;
+  function pause() { if (!paused){ paused = true; cancelAnimationFrame(raf); } }
+  function resume(){
+    if (paused){
+      paused = false;
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    }
+  }
+
+  globe.addEventListener('pointerdown', pause);
+  globe.addEventListener('pointerup', resume);
+  globe.addEventListener('pointercancel', resume);
+  globe.addEventListener('pointerleave', ()=>{ /* keep pausing while hovering helps targeting */ });
+
+  // Drag to “throw” a bit (minimal physics, optional)
+  let dragStart = null;
+  globe.addEventListener('pointerdown', (e) => {
+    globe.setPointerCapture(e.pointerId);
+    dragStart = { x: e.clientX, y: e.clientY, t: performance.now(), sx: x, sy: y };
+  });
+  globe.addEventListener('pointermove', (e) => {
+    if (!dragStart) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    x = dragStart.sx + dx;
+    y = dragStart.sy + dy;
+    globe.style.transform = `translate(${x}px, ${y}px)`;
+  });
+  globe.addEventListener('pointerup', (e) => {
+    if (!dragStart) return;
+    const dt = (performance.now() - dragStart.t) / 1000 || 0.016;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    // throw velocity based on drag distance
+    vx = clamp(dx / dt, -SPEED_MAX, SPEED_MAX);
+    vy = clamp(dy / dt, -SPEED_MAX, SPEED_MAX);
+    dragStart = null;
+    resume();
+  });
+
+  // Don’t steal keyboard focus from the page
+  globe.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      // navigate
+      window.location.href = DEST_URL;
     }
   });
 
-  // optional: cursor hint when hovering globe
-  cvs.addEventListener("mousemove", (e) => {
-    const rect = cvs.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const dx = mx - x;
-    const dy = my - y;
-    cvs.style.cursor = (dx * dx + dy * dy <= r * r) ? "pointer" : "default";
+  // ---- Safety: don’t interfere with your Poem UI / water clicks ----
+  // Only the circular element is clickable; everything else on page remains untouched.
+  // We also keep the element relatively small and at high z-index so it doesn’t cover
+  // large interaction zones.
+
+  // ---- Optional polish: faint border shimmer that tracks mouse (parallax) ----
+  addEventListener('pointermove', (e) => {
+    // quick, cheap parallax for the highlight
+    const rect = globe.getBoundingClientRect();
+    const cx = rect.left + rect.width  / 2;
+    const cy = rect.top  + rect.height / 2;
+    const dx = (e.clientX - cx) / rect.width;
+    const dy = (e.clientY - cy) / rect.height;
+    glare.style.transform = `translate(${dx * 10}px, ${dy * 10}px)`;
   });
 })();
