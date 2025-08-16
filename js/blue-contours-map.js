@@ -15,6 +15,7 @@
     projection: { name: "vertical-perspective" }, // swap to "globe" if you like
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
+      // DEM for hillshade (grayscale relief; dark lowlands → bright highlights)
       terrainRGB: {
         type: "raster-dem",
         url: withKey("https://api.maptiler.com/tiles/terrain-rgb/tiles.json?key={key}"),
@@ -32,7 +33,7 @@
     layers: [
       { id: "bg", type: "background", paint: { "background-color": "#000000" } },
 
-      // Relief (dark lowlands → bright ridges)
+      // Relief (dark → light; note hillshade shows slope/illumination not absolute height)
       {
         id: "hillshade",
         type: "hillshade",
@@ -135,7 +136,7 @@
   const lightCap = document.getElementById("lightbox-cap");
   const btnPrev  = document.getElementById("btn-prev");
   const btnNext  = document.getElementById("btn-next");
-  const btnClose = lightbox.querySelector(".close");
+  const btnClose = lightbox ? lightbox.querySelector(".close") : null;
 
   /** photo list kept in same order as photos.json */
   const photos = []; // {url,label,lon,lat}
@@ -143,6 +144,7 @@
   let currentIndex = -1;
 
   function openLightboxAt(i) {
+    if (!lightbox) return;
     if (i < 0 || i >= photos.length) return;
     currentIndex = i;
     const p = photos[i];
@@ -161,6 +163,7 @@
     img.src = photos[i].url;
   }
   function closeLightbox() {
+    if (!lightbox) return;
     lightbox.classList.remove("open");
     lightImg.src = "";
     lightCap.textContent = "";
@@ -169,28 +172,42 @@
   function showNext() { if (photos.length) openLightboxAt((currentIndex + 1) % photos.length); }
   function showPrev() { if (photos.length) openLightboxAt((currentIndex - 1 + photos.length) % photos.length); }
 
-  btnClose.addEventListener("click", closeLightbox);
-  btnNext.addEventListener("click", showNext);
-  btnPrev.addEventListener("click", showPrev);
+  if (btnClose) btnClose.addEventListener("click", closeLightbox);
+  if (btnNext)  btnNext.addEventListener("click", showNext);
+  if (btnPrev)  btnPrev.addEventListener("click", showPrev);
 
-  lightbox.addEventListener("click", (e) => {
-    // click backdrop closes; clicks on image/buttons do not
-    if (e.target === lightbox) closeLightbox();
-  });
+  if (lightbox) {
+    lightbox.addEventListener("click", (e) => {
+      // click backdrop closes; clicks on image/buttons do not
+      if (e.target === lightbox) closeLightbox();
+    });
+  }
 
   // keyboard: Esc, ←, →
   addEventListener("keydown", (e) => {
-    if (!lightbox.classList.contains("open")) return;
+    if (!lightbox || !lightbox.classList.contains("open")) return;
     if (e.key === "Escape") closeLightbox();
     else if (e.key === "ArrowRight") showNext();
     else if (e.key === "ArrowLeft") showPrev();
   });
 
-  // --- PHOTOS: read from travel/photos.json; EXIF GPS from each --------------
+  // --- PHOTOS: read from travel/photos.json; auto-handle strings or objects ---
   const statusEl = document.getElementById("status");
   const showStatus = (msg, hide = 2200) => {
+    if (!statusEl) return;
     statusEl.hidden = false; statusEl.textContent = msg;
     if (hide) setTimeout(() => (statusEl.hidden = true), hide);
+  };
+
+  const exifrAvailable = !!(window.exifr && typeof exifr.gps === "function");
+
+  const normalizeURL = (src) => {
+    if (!src) return null;
+    // If absolute or root-relative, leave as is
+    if (/^https?:\/\//i.test(src) || src.startsWith("/")) return src;
+    // Ensure single "travel/" prefix
+    if (!src.startsWith("travel/")) return `travel/${src}`;
+    return src;
   };
 
   async function loadTravelPhotos() {
@@ -203,33 +220,65 @@
       if (!Array.isArray(list) || list.length === 0) return showStatus("travel/photos.json is empty.");
 
       let placed = 0;
-      for (const name of list) {
-        if (typeof name !== "string") continue;
-        const url = `travel/${encodeURIComponent(name)}`;
-        try {
-          const gps = await exifr.gps(url); // {latitude, longitude}
-          if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
-            const p = { url, label: name, lon: gps.longitude, lat: gps.latitude };
-            photos.push(p);
-            addPhotoMarker(p, photos.length - 1);
+      for (const item of list) {
+        // Case A: object with pre-extracted coords { src, lat, lon }
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const url = normalizeURL(item.src);
+          const lat = Number(item.lat);
+          const lon = Number(item.lon);
+          if (url && isFinite(lat) && isFinite(lon)) {
+            const p = { url, label: url.split("/").pop(), lon, lat };
+            const index = photos.push(p) - 1;
+            addPhotoMarker(p, index);
             placed++;
-          } else {
-            console.warn("No GPS EXIF for", name);
+            continue;
           }
-        } catch (err) {
-          console.warn("EXIF parse failed for", name, err);
+          // If malformed, fall through to try EXIF if "src" looks like a filename
+          if (typeof item.src === "string" && exifrAvailable) {
+            await tryPlaceViaExif(item.src);
+          }
+          continue;
+        }
+
+        // Case B: plain string filename -> use EXIF if available
+        if (typeof item === "string") {
+          await tryPlaceViaExif(item);
         }
       }
 
       if (placed > 0) {
         showStatus(`Placed ${placed} photo${placed > 1 ? "s" : ""}.`);
       } else {
-        showStatus("No images had valid GPS EXIF.");
+        showStatus(exifrAvailable
+          ? "No images had valid GPS EXIF."
+          : "No GPS in JSON and EXIF library not loaded.");
       }
     } catch (e) {
       console.error(e);
       showStatus("Error loading photos.json (see console).");
     }
+  }
+
+  async function tryPlaceViaExif(name) {
+    const url = normalizeURL(name);
+    if (!url) return;
+    if (!exifrAvailable) {
+      console.warn("EXIF not available; skipping", name);
+      return;
+    }
+    try {
+      const gps = await exifr.gps(url); // {latitude, longitude}
+      if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
+        const p = { url, label: name, lon: gps.longitude, lat: gps.latitude };
+        const index = photos.push(p) - 1;
+        addPhotoMarker(p, index);
+        return true;
+      }
+      console.warn("No GPS EXIF for", name);
+    } catch (err) {
+      console.warn("EXIF parse failed for", name, err);
+    }
+    return false;
   }
 
   function addPhotoMarker(photo, index) {
