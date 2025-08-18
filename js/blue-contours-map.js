@@ -140,6 +140,8 @@
     lightImg.alt = "";               // ← no filename/label in alt
     lightCap.textContent = "";       // ← hide caption/filename
     lightbox.classList.add("open");
+    if (window.FourierOverlay)
+      FourierOverlay.show(photos, i);
     preload(i + 1); preload(i - 1);
   }
   function preload(i) {
