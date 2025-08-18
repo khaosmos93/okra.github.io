@@ -1,3 +1,4 @@
+// js/blue-contours-map.js
 (() => {
   // --- KEY helper ------------------------------------------------------------
   const urlKey = new URLSearchParams(location.search).get("key") || "";
@@ -12,7 +13,7 @@
   // --- STYLE: altitude B/W + water + waterways + contours --------------------
   const style = {
     version: 8,
-    projection: { name: "vertical-perspective" }, // swap to "globe" if you like
+    projection: { name: "vertical-perspective" },
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       terrainRGB: {
@@ -91,7 +92,7 @@
   const map = new maplibregl.Map({
     container: "map",
     style,
-    center: [100, 30], // Asia-ish
+    center: [100, 30],
     zoom: 3.5,
     hash: true,
     attributionControl: false
@@ -120,7 +121,7 @@
     loadTravelPhotos();
   });
 
-  // --- LIGHTBOX with slider --------------------------------------------------
+  // --- LIGHTBOX + FOURIER wiring --------------------------------------------
   const lightbox = document.getElementById("lightbox");
   const lightImg = document.getElementById("lightbox-img");
   const lightCap = document.getElementById("lightbox-cap");
@@ -128,7 +129,84 @@
   const btnNext  = document.getElementById("btn-next");
   const btnClose = lightbox ? lightbox.querySelector(".close") : null;
 
-  /** photo list kept in same order as photos.json */
+  const btnOutline = document.getElementById('btn-outline-toggle');
+  const btnCircles = document.getElementById('btn-circles-toggle');
+  const btnOrder   = document.getElementById('btn-order');
+  const fourierCanvas = document.getElementById('fourier-canvas');
+
+  let fourierAPI = null;   // instance from initFourierOutline
+  let fourierOrder = 20;
+  let fourierVisible = true;
+  let circlesVisible = true;
+
+  function sizeCanvasToImage() {
+    if (!fourierCanvas || !lightImg) return;
+    // the canvas is absolutely positioned inset:0 inside .wrap
+    // it will match the image box via CSS; we still set width/height to match CSS pixels
+    const r = lightImg.getBoundingClientRect();
+    // Set CSS size by letting inset:0 handle layout; only fix internal buffer:
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const w = Math.max(1, Math.round(r.width * dpr));
+    const h = Math.max(1, Math.round(r.height * dpr));
+    if (fourierCanvas.width !== w || fourierCanvas.height !== h) {
+      fourierCanvas.width = w;
+      fourierCanvas.height = h;
+    }
+  }
+
+  function buildCoeffsForImage(/*img*/) {
+    // Minimal working set: a single harmonic circle so the tip traces a circle.
+    // You can swap this later to DFT of an extracted contour.
+    // freq: 1 with amplitude; module scales by largest amp, so any amp works.
+    return [
+      { freq: 1, amp: 1, phase: 0 }
+    ];
+  }
+
+  function setupFourier() {
+    if (!window.initFourierOutline || !fourierCanvas) return;
+    sizeCanvasToImage();
+
+    // Build coefficients (replace with your DFT later)
+    const coeffs = buildCoeffsForImage(lightImg);
+
+    // (re)init API
+    fourierAPI = window.initFourierOutline(fourierCanvas, coeffs, {
+      order: fourierOrder,
+      showCircles: circlesVisible,
+      speed: 0.25,
+      fitScale: 0.9
+    });
+
+    // visibility
+    fourierCanvas.style.display = fourierVisible ? 'block' : 'none';
+    if (btnOrder) btnOrder.textContent = `Order: ${fourierOrder}`;
+  }
+
+  // UI buttons
+  if (btnOutline) {
+    btnOutline.addEventListener('click', () => {
+      fourierVisible = !fourierVisible;
+      if (fourierCanvas) fourierCanvas.style.display = fourierVisible ? 'block' : 'none';
+    });
+  }
+  if (btnCircles) {
+    btnCircles.addEventListener('click', () => {
+      circlesVisible = !circlesVisible;
+      if (fourierAPI) fourierAPI.setShowCircles(circlesVisible);
+    });
+  }
+  if (btnOrder) {
+    btnOrder.addEventListener('click', () => {
+      const v = prompt('Set Fourier order (1–200):', String(fourierOrder));
+      const n = Math.max(1, Math.min(200, Math.floor(+v || fourierOrder)));
+      fourierOrder = n;
+      btnOrder.textContent = `Order: ${fourierOrder}`;
+      if (fourierAPI) fourierAPI.setOrder(fourierOrder);
+    });
+  }
+
+  // Simple photo model used elsewhere
   const photos = []; // {url,label,lon,lat}
   let currentIndex = -1;
 
@@ -138,47 +216,43 @@
     currentIndex = i;
     const p = photos[i];
 
+    lightImg.onload = () => {
+      // no filename in caption when viewing full photo
+      if (lightCap) lightCap.textContent = '';
+      setupFourier();
+    };
     lightImg.src = p.url;
-    lightImg.alt = p.label || "";
-    lightCap.textContent = "";       // keep caption empty (no filename)
+    lightImg.alt = '';
+
     lightbox.classList.add("open");
 
-    // Let the Fourier overlay module know
-    document.dispatchEvent(new CustomEvent("lightbox:open", {
-      detail: { url: p.url, index: i, width: lightImg.naturalWidth || 0, height: lightImg.naturalHeight || 0 }
-    }));
+    // preload neighbors
+    preload(i + 1);
+    preload(i - 1);
   }
+  function preload(i) { if (i>=0 && i<photos.length){ const im=new Image(); im.src=photos[i].url; } }
   function closeLightbox() {
     if (!lightbox) return;
     lightbox.classList.remove("open");
     lightImg.src = "";
-    lightCap.textContent = "";
+    if (lightCap) lightCap.textContent = "";
     currentIndex = -1;
-
-    document.dispatchEvent(new CustomEvent("lightbox:close"));
   }
   function showNext() { if (photos.length) openLightboxAt((currentIndex + 1) % photos.length); }
   function showPrev() { if (photos.length) openLightboxAt((currentIndex - 1 + photos.length) % photos.length); }
-
   if (btnClose) btnClose.addEventListener("click", closeLightbox);
   if (btnNext)  btnNext.addEventListener("click", showNext);
   if (btnPrev)  btnPrev.addEventListener("click", showPrev);
-
-  if (lightbox) {
-    lightbox.addEventListener("click", (e) => {
-      if (e.target === lightbox) closeLightbox();
-    });
-  }
-
-  // keyboard: Esc, ←, →
+  if (lightbox) lightbox.addEventListener("click", e => { if (e.target === lightbox) closeLightbox(); });
   addEventListener("keydown", (e) => {
     if (!lightbox || !lightbox.classList.contains("open")) return;
     if (e.key === "Escape") closeLightbox();
     else if (e.key === "ArrowRight") showNext();
     else if (e.key === "ArrowLeft") showPrev();
   });
+  addEventListener('resize', () => { if (lightbox && lightbox.classList.contains('open')) sizeCanvasToImage(); });
 
-  // --- PHOTOS from travel/photos.json (strings or {src,lat,lon}) -------------
+  // --- PHOTOS: read from travel/photos.json; EXIF if needed ------------------
   const statusEl = document.getElementById("status");
   const showStatus = (msg, hide = 2200) => {
     if (!statusEl) return;
@@ -186,7 +260,6 @@
     if (hide) setTimeout(() => (statusEl.hidden = true), hide);
   };
   const exifrAvailable = !!(window.exifr && typeof exifr.gps === "function");
-
   const normalizeURL = (src) => {
     if (!src) return null;
     if (/^https?:\/\//i.test(src) || src.startsWith("/")) return src;
@@ -199,7 +272,6 @@
       showStatus("Loading photos from travel/photos.json…", 0);
       const res = await fetch("travel/photos.json", { cache: "no-store" });
       if (!res.ok) return showStatus("travel/photos.json not found.");
-
       const list = await res.json();
       if (!Array.isArray(list) || list.length === 0) return showStatus("travel/photos.json is empty.");
 
@@ -211,8 +283,7 @@
           const lon = Number(item.lon);
           if (url && isFinite(lat) && isFinite(lon)) {
             const p = { url, label: url.split("/").pop(), lon, lat };
-            const index = photos.push(p) - 1;
-            addPhotoMarker(p, index);
+            addPhotoMarker(p, photos.push(p) - 1);
             placed++;
             continue;
           }
@@ -232,33 +303,31 @@
 
   async function tryPlaceViaExif(name) {
     const url = normalizeURL(name);
-    if (!url || !exifrAvailable) return;
+    if (!url) return;
+    if (!exifrAvailable) return;
     try {
       const gps = await exifr.gps(url);
       if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
         const p = { url, label: name, lon: gps.longitude, lat: gps.latitude };
-        const index = photos.push(p) - 1;
-        addPhotoMarker(p, index);
+        addPhotoMarker(p, photos.push(p) - 1);
         return true;
       }
-      // Random Antarctica fallback
-      const { lon, lat } = randomLngLat();
+      // fallback: random Antarctica as per your earlier requirement
+      const { lon, lat } = randomLngLatAntarctica();
       const p = { url, label: name, lon, lat };
-      const index = photos.push(p) - 1;
-      addPhotoMarker(p, index);
+      addPhotoMarker(p, photos.push(p) - 1);
       return true;
-    } catch (err) {
-      const { lon, lat } = randomLngLat();
+    } catch {
+      const { lon, lat } = randomLngLatAntarctica();
       const p = { url, label: name, lon, lat };
-      const index = photos.push(p) - 1;
-      addPhotoMarker(p, index);
+      addPhotoMarker(p, photos.push(p) - 1);
       return true;
     }
   }
 
-  function randomLngLat() {
+  function randomLngLatAntarctica() {
     const lon = Math.random() * 360 - 180;
-    const lat = -60 - Math.random() * 30; // [-90, -60)
+    const lat = -60 - Math.random() * 30; // [-90,-60)
     return { lon, lat };
   }
 
@@ -267,10 +336,7 @@
     img.className = "marker-img";
     img.src = photo.url;
     img.alt = photo.label || "photo";
-    img.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openLightboxAt(index);
-    });
+    img.addEventListener("click", (e) => { e.stopPropagation(); openLightboxAt(index); });
 
     new maplibregl.Marker({ element: img, anchor: "bottom" })
       .setLngLat([photo.lon, photo.lat])
@@ -282,7 +348,6 @@
     }
   }
 
-  // Helpful key warning
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
