@@ -12,7 +12,7 @@
   // --- STYLE: altitude B/W + water + waterways + contours --------------------
   const style = {
     version: 8,
-    projection: { name: "vertical-perspective" },
+    projection: { name: "vertical-perspective" }, // swap to "globe" if you like
     glyphs: withKey("https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key={key}"),
     sources: {
       terrainRGB: {
@@ -91,8 +91,8 @@
   const map = new maplibregl.Map({
     container: "map",
     style,
-    center: [100, 30],   // Asia-centered (lon, lat)
-    zoom: 5.5,           // ≈1000km box width
+    center: [100, 30], // Asia-ish
+    zoom: 3.5,
     hash: true,
     attributionControl: false
   });
@@ -128,6 +128,7 @@
   const btnNext  = document.getElementById("btn-next");
   const btnClose = lightbox ? lightbox.querySelector(".close") : null;
 
+  /** photo list kept in same order as photos.json */
   const photos = []; // {url,label,lon,lat}
   let currentIndex = -1;
 
@@ -136,18 +137,16 @@
     if (i < 0 || i >= photos.length) return;
     currentIndex = i;
     const p = photos[i];
+
     lightImg.src = p.url;
-    lightImg.alt = "";               // ← no filename/label in alt
-    lightCap.textContent = "";       // ← hide caption/filename
+    lightImg.alt = p.label || "";
+    lightCap.textContent = "";       // keep caption empty (no filename)
     lightbox.classList.add("open");
-    if (window.FourierOverlay)
-      FourierOverlay.show(photos, i);
-    preload(i + 1); preload(i - 1);
-  }
-  function preload(i) {
-    if (i < 0 || i >= photos.length) return;
-    const img = new Image();
-    img.src = photos[i].url;
+
+    // Let the Fourier overlay module know
+    document.dispatchEvent(new CustomEvent("lightbox:open", {
+      detail: { url: p.url, index: i, width: lightImg.naturalWidth || 0, height: lightImg.naturalHeight || 0 }
+    }));
   }
   function closeLightbox() {
     if (!lightbox) return;
@@ -155,6 +154,8 @@
     lightImg.src = "";
     lightCap.textContent = "";
     currentIndex = -1;
+
+    document.dispatchEvent(new CustomEvent("lightbox:close"));
   }
   function showNext() { if (photos.length) openLightboxAt((currentIndex + 1) % photos.length); }
   function showPrev() { if (photos.length) openLightboxAt((currentIndex - 1 + photos.length) % photos.length); }
@@ -162,9 +163,14 @@
   if (btnClose) btnClose.addEventListener("click", closeLightbox);
   if (btnNext)  btnNext.addEventListener("click", showNext);
   if (btnPrev)  btnPrev.addEventListener("click", showPrev);
+
   if (lightbox) {
-    lightbox.addEventListener("click", (e) => { if (e.target === lightbox) closeLightbox(); });
+    lightbox.addEventListener("click", (e) => {
+      if (e.target === lightbox) closeLightbox();
+    });
   }
+
+  // keyboard: Esc, ←, →
   addEventListener("keydown", (e) => {
     if (!lightbox || !lightbox.classList.contains("open")) return;
     if (e.key === "Escape") closeLightbox();
@@ -172,15 +178,15 @@
     else if (e.key === "ArrowLeft") showPrev();
   });
 
-  // --- PHOTOS ---------------------------------------------------------------
+  // --- PHOTOS from travel/photos.json (strings or {src,lat,lon}) -------------
   const statusEl = document.getElementById("status");
   const showStatus = (msg, hide = 2200) => {
     if (!statusEl) return;
     statusEl.hidden = false; statusEl.textContent = msg;
     if (hide) setTimeout(() => (statusEl.hidden = true), hide);
   };
-
   const exifrAvailable = !!(window.exifr && typeof exifr.gps === "function");
+
   const normalizeURL = (src) => {
     if (!src) return null;
     if (/^https?:\/\//i.test(src) || src.startsWith("/")) return src;
@@ -217,7 +223,7 @@
       }
 
       if (placed > 0) showStatus(`Placed ${placed} photo${placed > 1 ? "s" : ""}.`);
-      else showStatus(exifrAvailable ? "No images had valid GPS EXIF." : "No GPS in JSON and EXIF library not loaded.");
+      else showStatus(exifrAvailable ? "No images had valid GPS EXIF." : "No GPS in JSON and EXIF not loaded.");
     } catch (e) {
       console.error(e);
       showStatus("Error loading photos.json (see console).");
@@ -226,8 +232,7 @@
 
   async function tryPlaceViaExif(name) {
     const url = normalizeURL(name);
-    if (!url) return;
-    if (!exifrAvailable) { console.warn("EXIF not available; skipping", name); return; }
+    if (!url || !exifrAvailable) return;
     try {
       const gps = await exifr.gps(url);
       if (gps && isFinite(gps.longitude) && isFinite(gps.latitude)) {
@@ -236,14 +241,13 @@
         addPhotoMarker(p, index);
         return true;
       }
-      console.warn("No GPS EXIF for", name, "→ placing randomly");
+      // Random Antarctica fallback
       const { lon, lat } = randomLngLat();
       const p = { url, label: name, lon, lat };
       const index = photos.push(p) - 1;
       addPhotoMarker(p, index);
       return true;
     } catch (err) {
-      console.warn("EXIF parse failed for", name, err, "→ placing randomly");
       const { lon, lat } = randomLngLat();
       const p = { url, label: name, lon, lat };
       const index = photos.push(p) - 1;
@@ -252,59 +256,17 @@
     }
   }
 
-  // Random lon/lat — force Antarctica (lat ∈ [-90, -60))
   function randomLngLat() {
     const lon = Math.random() * 360 - 180;
-    const lat = -70 - Math.random() * 15;
+    const lat = -60 - Math.random() * 30; // [-90, -60)
     return { lon, lat };
   }
 
-  // --- NEW: tiny thumbnail generator for markers (minimal change) -----------
-  async function createThumb(src, size = 40, type = 'image/webp', quality = 0.7) {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.decoding = 'async';
-      img.onload = () => {
-        try {
-          const s = size;
-          const canvas = document.createElement('canvas');
-          canvas.width = s; canvas.height = s;
-          const ctx = canvas.getContext('2d', { alpha: false });
-
-          // cover-crop to square
-          const iw = img.naturalWidth || img.width;
-          const ih = img.naturalHeight || img.height;
-          const r = iw / ih;
-          let sx = 0, sy = 0, sw = iw, sh = ih;
-          if (r > 1) { // wider
-            sw = ih * r; sx = (iw - sw) * 0.5;
-          } else {     // taller
-            sh = iw / r; sy = (ih - sh) * 0.5;
-          }
-          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, s, s);
-          resolve(canvas.toDataURL(type, quality));
-        } catch (e) { reject(e); }
-      };
-      img.onerror = reject;
-      img.src = src;
-    });
-  }
-
-  async function addPhotoMarker(photo, index) {
+  function addPhotoMarker(photo, index) {
     const img = document.createElement("img");
     img.className = "marker-img";
-    img.alt = "photo";
-    img.loading = "lazy";
-    img.decoding = "async";
-
-    // ↓↓↓ use small thumbnail instead of full photo (memory saver)
-    try {
-      img.src = await createThumb(photo.url, 40);  // 40px thumb
-    } catch {
-      img.src = photo.url; // fallback if canvas fails
-    }
-
+    img.src = photo.url;
+    img.alt = photo.label || "photo";
     img.addEventListener("click", (e) => {
       e.stopPropagation();
       openLightboxAt(index);
@@ -314,12 +276,13 @@
       .setLngLat([photo.lon, photo.lat])
       .addTo(map);
 
-    // if (!addPhotoMarker._flown) {
-    //   addPhotoMarker._flown = true;
-    //   map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
-    // }
+    if (!addPhotoMarker._flown) {
+      addPhotoMarker._flown = true;
+      map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
+    }
   }
 
+  // Helpful key warning
   map.on("error", (e) => {
     const err = e && e.error;
     if (!err || !err.url) return;
