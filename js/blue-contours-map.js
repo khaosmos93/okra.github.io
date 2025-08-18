@@ -134,17 +134,14 @@
   const btnOrder   = document.getElementById('btn-order');
   const fourierCanvas = document.getElementById('fourier-canvas');
 
-  let fourierAPI = null;   // instance from initFourierOutline
+  let fourierAPI = null;
   let fourierOrder = 20;
   let fourierVisible = true;
   let circlesVisible = true;
 
   function sizeCanvasToImage() {
     if (!fourierCanvas || !lightImg) return;
-    // the canvas is absolutely positioned inset:0 inside .wrap
-    // it will match the image box via CSS; we still set width/height to match CSS pixels
     const r = lightImg.getBoundingClientRect();
-    // Set CSS size by letting inset:0 handle layout; only fix internal buffer:
     const dpr = Math.max(1, window.devicePixelRatio || 1);
     const w = Math.max(1, Math.round(r.width * dpr));
     const h = Math.max(1, Math.round(r.height * dpr));
@@ -154,92 +151,107 @@
     }
   }
 
-  function buildCoeffsForImage(/*img*/) {
-    // Minimal working set: a single harmonic circle so the tip traces a circle.
-    // You can swap this later to DFT of an extracted contour.
-    // freq: 1 with amplitude; module scales by largest amp, so any amp works.
-    return [
-      { freq: 1, amp: 1, phase: 0 }
-    ];
+  // --- new helpers (edge → points → DFT) ------------------------------------
+  async function extractOutlinePoints(img, {maxPts=600, down=0.5, threshold=40} = {}) {
+    const w = Math.max(4, Math.floor(img.naturalWidth  * down));
+    const h = Math.max(4, Math.floor(img.naturalHeight * down));
+    const cvs = document.createElement('canvas');
+    cvs.width = w; cvs.height = h;
+    const ctx = cvs.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    const gray = new Uint8ClampedArray(w*h);
+    for (let i=0,j=0; i<data.length; i+=4,j++) {
+      gray[j] = (data[i]*0.299 + data[i+1]*0.587 + data[i+2]*0.114)|0;
+    }
+    const edge = new Uint8ClampedArray(w*h);
+    for (let y=1;y<h-1;y++) for (let x=1;x<w-1;x++) {
+      const i = y*w+x;
+      const gx = gray[i+1]-gray[i-1];
+      const gy = gray[i+w]-gray[i-w];
+      const mag = Math.abs(gx)+Math.abs(gy);
+      edge[i] = mag>threshold?255:0;
+    }
+    const pts=[];
+    const step=Math.max(1,Math.floor(Math.sqrt((w*h)/maxPts)));
+    for (let y=1;y<h-1;y+=step) for (let x=1;x<w-1;x+=step) {
+      if(edge[y*w+x]) pts.push({x,y});
+    }
+    const cx=w/2, cy=h/2, s=Math.min(w,h);
+    return pts.map(p=>({x:(p.x-cx)/s,y:(p.y-cy)/s}));
   }
 
-  function setupFourier() {
+  function dftCoeffs(points, order=20) {
+    if (!points.length) return [];
+    const N=points.length;
+    const ks=[0]; for(let k=1;k<=order;k++) ks.push(k,-k);
+    const coeffs=[];
+    for(const k of ks){
+      let re=0,im=0;
+      for(let n=0;n<N;n++){
+        const t=n/N;
+        const ang=-2*Math.PI*k*t;
+        const xr=points[n].x, xi=points[n].y;
+        re += xr*Math.cos(ang) - xi*Math.sin(ang);
+        im += xr*Math.sin(ang) + xi*Math.cos(ang);
+      }
+      re/=N; im/=N;
+      coeffs.push({freq:k,re,im});
+    }
+    coeffs.sort((a,b)=>Math.hypot(b.re,b.im)-Math.hypot(a.re,a.im)||(Math.abs(a.freq)-Math.abs(b.freq)));
+    return coeffs;
+  }
+
+  async function setupFourier() {
     if (!window.initFourierOutline || !fourierCanvas) return;
     sizeCanvasToImage();
-
-    // Build coefficients (replace with your DFT later)
-    const coeffs = buildCoeffsForImage(lightImg);
-
-    // (re)init API
-    fourierAPI = window.initFourierOutline(fourierCanvas, coeffs, {
-      order: fourierOrder,
-      showCircles: circlesVisible,
-      speed: 0.25,
-      fitScale: 0.9
+    await lightImg.decode().catch(()=>{});
+    let coeffs=[];
+    try{
+      const pts=await extractOutlinePoints(lightImg);
+      if(pts.length>10) coeffs=dftCoeffs(pts,64);
+    }catch(e){console.warn("outline extraction failed",e);}
+    if(!coeffs.length) coeffs=[{freq:1,amp:1,phase:0}]; // fallback
+    fourierAPI=window.initFourierOutline(fourierCanvas,coeffs,{
+      order:fourierOrder,
+      showCircles:circlesVisible,
+      speed:0.3
     });
-
-    // visibility
-    fourierCanvas.style.display = fourierVisible ? 'block' : 'none';
-    if (btnOrder) btnOrder.textContent = `Order: ${fourierOrder}`;
+    fourierCanvas.style.display=fourierVisible?'block':'none';
+    if(btnOrder) btnOrder.textContent=`Order: ${fourierOrder}`;
   }
 
   // UI buttons
-  if (btnOutline) {
-    btnOutline.addEventListener('click', () => {
-      fourierVisible = !fourierVisible;
-      if (fourierCanvas) fourierCanvas.style.display = fourierVisible ? 'block' : 'none';
-    });
-  }
-  if (btnCircles) {
-    btnCircles.addEventListener('click', () => {
-      circlesVisible = !circlesVisible;
-      if (fourierAPI) fourierAPI.setShowCircles(circlesVisible);
-    });
-  }
-  if (btnOrder) {
-    btnOrder.addEventListener('click', () => {
-      const v = prompt('Set Fourier order (1–200):', String(fourierOrder));
-      const n = Math.max(1, Math.min(200, Math.floor(+v || fourierOrder)));
-      fourierOrder = n;
-      btnOrder.textContent = `Order: ${fourierOrder}`;
-      if (fourierAPI) fourierAPI.setOrder(fourierOrder);
-    });
-  }
+  if (btnOutline) btnOutline.addEventListener('click', () => {
+    fourierVisible=!fourierVisible;
+    fourierCanvas.style.display=fourierVisible?'block':'none';
+  });
+  if (btnCircles) btnCircles.addEventListener('click', () => {
+    circlesVisible=!circlesVisible;
+    if(fourierAPI) fourierAPI.setShowCircles(circlesVisible);
+  });
+  if (btnOrder) btnOrder.addEventListener('click', () => {
+    const v=prompt('Set Fourier order (1–200):',String(fourierOrder));
+    const n=Math.max(1,Math.min(200,Math.floor(+v||fourierOrder)));
+    fourierOrder=n;
+    btnOrder.textContent=`Order: ${fourierOrder}`;
+    if(fourierAPI) fourierAPI.setOrder(fourierOrder);
+  });
 
-  // Simple photo model used elsewhere
-  const photos = []; // {url,label,lon,lat}
-  let currentIndex = -1;
-
-  function openLightboxAt(i) {
-    if (!lightbox) return;
-    if (i < 0 || i >= photos.length) return;
-    currentIndex = i;
-    const p = photos[i];
-
-    lightImg.onload = () => {
-      // no filename in caption when viewing full photo
-      if (lightCap) lightCap.textContent = '';
-      setupFourier();
-    };
-    lightImg.src = p.url;
-    lightImg.alt = '';
-
+  // --- Lightbox core ---------------------------------------------------------
+  const photos=[]; let currentIndex=-1;
+  function openLightboxAt(i){
+    if(!lightbox||i<0||i>=photos.length)return;
+    currentIndex=i; const p=photos[i];
+    lightImg.onload=()=>{ if(lightCap) lightCap.textContent=''; setupFourier(); };
+    lightImg.src=p.url; lightImg.alt='';
     lightbox.classList.add("open");
-
-    // preload neighbors
-    preload(i + 1);
-    preload(i - 1);
+    preload(i+1); preload(i-1);
   }
-  function preload(i) { if (i>=0 && i<photos.length){ const im=new Image(); im.src=photos[i].url; } }
-  function closeLightbox() {
-    if (!lightbox) return;
-    lightbox.classList.remove("open");
-    lightImg.src = "";
-    if (lightCap) lightCap.textContent = "";
-    currentIndex = -1;
-  }
-  function showNext() { if (photos.length) openLightboxAt((currentIndex + 1) % photos.length); }
-  function showPrev() { if (photos.length) openLightboxAt((currentIndex - 1 + photos.length) % photos.length); }
+  function preload(i){ if(i>=0&&i<photos.length){const im=new Image();im.src=photos[i].url;} }
+  function closeLightbox(){ if(!lightbox)return; lightbox.classList.remove("open"); lightImg.src=""; if(lightCap) lightCap.textContent=""; currentIndex=-1; }
+  function showNext(){ if(photos.length) openLightboxAt((currentIndex+1)%photos.length); }
+  function showPrev(){ if(photos.length) openLightboxAt((currentIndex-1+photos.length)%photos.length); }
   if (btnClose) btnClose.addEventListener("click", closeLightbox);
   if (btnNext)  btnNext.addEventListener("click", showNext);
   if (btnPrev)  btnPrev.addEventListener("click", showPrev);
@@ -312,7 +324,7 @@
         addPhotoMarker(p, photos.push(p) - 1);
         return true;
       }
-      // fallback: random Antarctica as per your earlier requirement
+      // fallback: random Antarctica
       const { lon, lat } = randomLngLatAntarctica();
       const p = { url, label: name, lon, lat };
       addPhotoMarker(p, photos.push(p) - 1);
@@ -342,6 +354,7 @@
       .setLngLat([photo.lon, photo.lat])
       .addTo(map);
 
+    // keep default center/zoom; do NOT auto-fly to first photo
     // if (!addPhotoMarker._flown) {
     //   addPhotoMarker._flown = true;
     //   map.flyTo({ center: [photo.lon, photo.lat], zoom: Math.max(map.getZoom(), 3.2), speed: 0.8 });
